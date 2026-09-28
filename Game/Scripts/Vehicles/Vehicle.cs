@@ -274,6 +274,15 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
     }
 
+    // A script reload drops every managed binding, so the hull has to start listening for contacts again.
+    public override void OnReloaded(SScriptReloadContext Context)
+    {
+        if (!bDestroyed && Registry.TryGet<SRigidBodyComponent>(Entity) is { } Body)
+        {
+            Body.OnContactBegin.Bind(OnHullContact);
+        }
+    }
+
     // Skids and bumpers soak up a gentle knock, and anything harder damages the hull and whatever it struck.
     private void OnHullContact(SCollisionEvent Contact)
     {

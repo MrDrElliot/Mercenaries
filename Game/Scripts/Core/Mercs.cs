@@ -159,7 +159,8 @@ public static class Mercs
 
     public static IDamageable? FindDamageable(Entity Hit)
     {
-        if (Hit.IsNull)
+        // A contact can arrive between a script reload clearing the statics and the level restart that rebuilds them.
+        if (Hit.IsNull || !IsRunning)
         {
             return null;
         }

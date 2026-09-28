@@ -44,42 +44,57 @@ public sealed class WorldBuilder
             Terrain.AddRoad(WithPadHeight(Nodes[From].Center), WithPadHeight(Nodes[To].Center), 7.0f);
         }
 
-        Terrain.Build(World, Registry);
+        using (Profiler.Sample("WorldBuilder.Terrain"))
+        {
+            Terrain.Build(World, Registry);
+        }
 
         foreach (Site Place in Mercs.Sites)
         {
             Place.Center = Geo.Ground(Place.Center);
         }
 
-        BuildLighting();
-        BuildPmc(Nodes["PMC"]);
-        BuildFactionHq(Nodes["AN"], EFaction.Allied);
-        BuildFactionHq(Nodes["CHN"], EFaction.China);
-        BuildRefinery(Nodes["OIL"]);
-        BuildCamp(Nodes["PLAV"]);
-        BuildHarbor(Nodes["PIR"]);
-        BuildCapital(Nodes["CAP"]);
+        using (Profiler.Sample("WorldBuilder.Sites"))
+        {
+            BuildLighting();
+            BuildPmc(Nodes["PMC"]);
+            BuildFactionHq(Nodes["AN"], EFaction.Allied);
+            BuildFactionHq(Nodes["CHN"], EFaction.China);
+            BuildRefinery(Nodes["OIL"]);
+            BuildCamp(Nodes["PLAV"]);
+            BuildHarbor(Nodes["PIR"]);
+            BuildCapital(Nodes["CAP"]);
 
-        BuildOutpost(Nodes["O1"], true, false, true);
-        BuildOutpost(Nodes["O2"], false, true, false);
-        BuildOutpost(Nodes["O3"], true, false, false);
-        BuildOutpost(Nodes["O4"], false, false, true);
-        BuildOutpost(Nodes["O5"], true, true, false);
-        BuildOutpost(Nodes["O6"], false, false, false);
+            BuildOutpost(Nodes["O1"], true, false, true);
+            BuildOutpost(Nodes["O2"], false, true, false);
+            BuildOutpost(Nodes["O3"], true, false, false);
+            BuildOutpost(Nodes["O4"], false, false, true);
+            BuildOutpost(Nodes["O5"], true, true, false);
+            BuildOutpost(Nodes["O6"], false, false, false);
 
-        BuildVillage(Nodes["V1"], 7);
-        BuildVillage(Nodes["V2"], 6);
-        BuildVillage(Nodes["V3"], 5);
-        BuildVillage(Nodes["V4"], 6);
+            BuildVillage(Nodes["V1"], 7);
+            BuildVillage(Nodes["V2"], 6);
+            BuildVillage(Nodes["V3"], 5);
+            BuildVillage(Nodes["V4"], 6);
 
-        BuildFuelDepot(Nodes["F1"], EFaction.VZ);
-        BuildFuelDepot(Nodes["F2"], EFaction.Oil);
-        BuildFuelDepot(Nodes["F3"], EFaction.VZ);
+            BuildFuelDepot(Nodes["F1"], EFaction.VZ);
+            BuildFuelDepot(Nodes["F2"], EFaction.Oil);
+            BuildFuelDepot(Nodes["F3"], EFaction.VZ);
+        }
 
-        AddPatrols();
-        ScatterDecor();
-        CommitDecor();
-        Mercs.Destruction.CommitFoliage();
+        using (Profiler.Sample("WorldBuilder.Patrols"))
+        {
+            AddPatrols();
+        }
+        using (Profiler.Sample("WorldBuilder.Decor"))
+        {
+            ScatterDecor();
+            CommitDecor();
+        }
+        using (Profiler.Sample("WorldBuilder.Foliage"))
+        {
+            Mercs.Destruction.CommitFoliage();
+        }
         DefineHvts();
         DefineContracts();
         BuildNavigation();

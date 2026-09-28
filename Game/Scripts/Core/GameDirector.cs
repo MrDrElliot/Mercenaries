@@ -25,6 +25,7 @@ public sealed class GameDirector : EntityScript
     private Vehicle? PendingRide;
     public bool bGodMode;
     private bool bBuilt;
+    private bool bLeaving;
     private float SiteTimer;
     private int CheatPlant = -1;
 
@@ -38,12 +39,23 @@ public sealed class GameDirector : EntityScript
         Sfx.Reset();
         Music.Reset();
         Mercs.Wallet.Cash = StartingCash;
+        if (MainMenu.ChosenMercenary is { } Chosen)
+        {
+            Mercenary = Chosen;
+            MainMenu.ChosenMercenary = null;
+        }
 
         DateTime Started = DateTime.Now;
-        new WorldBuilder(World).Build();
-        Mercs.Fx.Initialize();
-        Gore.Reset();
-        Mercs.Ordnance.Initialize();
+        using (Profiler.Sample("WorldBuilder.Build"))
+        {
+            new WorldBuilder(World).Build();
+        }
+        using (Profiler.Sample("GameDirector.Effects"))
+        {
+            Mercs.Fx.Initialize();
+            Gore.Reset();
+            Mercs.Ordnance.Initialize();
+        }
 
         Site? Hq = Mercs.Sites.Find(Site => Site.Kind == ESiteKind.PmcHq);
         Site? Capital = Mercs.Sites.Find(Site => Site.Kind == ESiteKind.Capital);
@@ -72,6 +84,13 @@ public sealed class GameDirector : EntityScript
         Mercs.Feed.Announce("MERCENARIES", $"{MercPlayer.MercName(Mercenary)} lands in Venezuela. Solano stiffed you. Make him pay.", 7.0f);
         Mercs.Feed.Post("Visit a faction contact (blue marker) for contracts, or press [Tab] for the PDA.", ENewsTone.Good);
         Mercs.Feed.Post("Press [F1] for the controls.", ENewsTone.Neutral);
+    }
+
+    // Mercs keeps the island in statics that a script reload resets, so the level restarts rather than running on empty state.
+    public override void OnReloaded(SScriptReloadContext Context)
+    {
+        Debug.Log("Mercenaries: scripts reloaded, restarting the island so its static state is rebuilt.");
+        Game.OpenLevel(MainMenu.IslandMap);
     }
 
     public override void OnDetach()
@@ -121,6 +140,17 @@ public sealed class GameDirector : EntityScript
         if (bDevCheats)
         {
             TickCheats();
+        }
+
+        bool bSoakVisitOver = MainMenu.SoakSeconds > 0.0f && Mercs.Time > MainMenu.SoakSeconds && !bLeaving;
+        if (bSoakVisitOver || (CInputLibrary.WasKeyPressed(World, EKey.F10) && !bLeaving))
+        {
+            bLeaving = true;
+            if (bSoakVisitOver)
+            {
+                Debug.Log($"[Soak] visit {++MainMenu.SoakCycle} over after {Mercs.Time:0.0}s, {Mercs.Soldiers.Count} soldiers alive.");
+            }
+            MainMenu.ReturnToMenu();
         }
 
         SiteTimer -= Step;

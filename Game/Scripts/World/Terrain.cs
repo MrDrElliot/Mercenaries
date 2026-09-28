@@ -174,7 +174,53 @@ public static class Terrain
         return (Rolling + Bumps) * (1.0f - Flatten);
     }
 
+    // The island comes out the same on every visit, so the generated fields are kept for the next load instead of regenerated.
+    private static int CachedFeatureKey;
+    private static float[]? CachedHeights;
+    private static float[]? CachedNormalized;
+    private static byte[]? CachedWeights;
+
+    private static int FeatureKey()
+    {
+        HashCode Key = new();
+        foreach (FPad Pad in Pads)
+        {
+            Key.Add(Pad.Center.X);
+            Key.Add(Pad.Center.Y);
+            Key.Add(Pad.Center.Z);
+            Key.Add(Pad.Radius);
+            Key.Add(Pad.bPaved);
+        }
+        foreach (float Height in PadHeights)
+        {
+            Key.Add(Height);
+        }
+        foreach (FRoad Road in Roads)
+        {
+            Key.Add(Road.From.X);
+            Key.Add(Road.From.Y);
+            Key.Add(Road.From.Z);
+            Key.Add(Road.To.X);
+            Key.Add(Road.To.Y);
+            Key.Add(Road.To.Z);
+            Key.Add(Road.Width);
+        }
+        return Key.ToHashCode();
+    }
+
     public static void Build(CWorld World, EntityRegistry Registry)
+    {
+        int Key = FeatureKey();
+        if (CachedHeights is null || CachedNormalized is null || CachedWeights is null || Key != CachedFeatureKey)
+        {
+            GenerateFields();
+            CachedFeatureKey = Key;
+        }
+        Heights = CachedHeights!;
+        CreateGround(World, Registry, CachedNormalized!, CachedWeights!);
+    }
+
+    private static void GenerateFields()
     {
         int Count = Resolution * Resolution;
         Heights = new float[Count];
@@ -213,6 +259,13 @@ public static class Terrain
             }
         });
 
+        CachedHeights = Heights;
+        CachedNormalized = Normalized;
+        CachedWeights = Weights;
+    }
+
+    private static void CreateGround(CWorld World, EntityRegistry Registry, float[] Normalized, byte[] Weights)
+    {
         Entity Ground = World.CreateEntity("Terrain", new FVector3(0.0f, BaseHeight, 0.0f));
         STerrainComponent Surface = Registry.GetOrAdd<STerrainComponent>(Ground)!;
         Surface.Resolution = Resolution;

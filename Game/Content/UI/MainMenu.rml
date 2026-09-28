@@ -1,0 +1,49 @@
+<rml>
+<head>
+    <title>Mercenaries</title>
+    <style>
+        div, p, h1, h2 { display: block; }
+
+        body
+        {
+            width: 100%;
+            height: 100%;
+            font-size: 18dp;
+            color: #f2eee6;
+            background-color: #101418;
+        }
+
+        #frame { position: absolute; left: 8%; top: 18%; width: 420dp; }
+        #title { font-size: 64dp; font-weight: bold; color: #f0922e; letter-spacing: 4dp; }
+        #subtitle { font-size: 18dp; color: #a8a39a; margin-bottom: 36dp; }
+        .btn
+        {
+            background-color: #0b0d0fcc;
+            border: 2dp #f0922e66;
+            border-radius: 4dp;
+            padding: 12dp 16dp;
+            margin-bottom: 10dp;
+            font-size: 20dp;
+            font-weight: bold;
+        }
+        .btn:hover { background-color: #f0922e; color: #101418; }
+        .role { font-size: 13dp; font-weight: normal; color: #a8a39a; }
+        .btn:hover .role { color: #101418; }
+        #status { margin-top: 24dp; color: #d9c24a; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body data-model="menu">
+    <div id="frame">
+        <div id="title">MERCENARIES</div>
+        <div id="subtitle">Playground of destruction</div>
+        <div data-class-hidden="Loading">
+            <div id="play-mattias" class="btn" data-event-click="Play(0)">MATTIAS NILSSON<div class="role">Regenerates health fastest.</div></div>
+            <div id="play-jennifer" class="btn" data-event-click="Play(1)">JENNIFER MUI<div class="role">Fastest sprint, less health.</div></div>
+            <div id="play-chris" class="btn" data-event-click="Play(2)">CHRIS JACOBS<div class="role">Carries the most grenades and charges.</div></div>
+            <div id="quit" class="btn" data-event-click="Quit()">QUIT</div>
+        </div>
+        <div id="status">{{ Status }}</div>
+    </div>
+</body>
+</rml>
