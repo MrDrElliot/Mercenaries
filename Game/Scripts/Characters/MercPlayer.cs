@@ -831,7 +831,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
 
     public void ForceExitVehicle(FVector3 Exit)
     {
-        if (CurrentVehicle is null)
+        if (CurrentVehicle is null || !IsValid)
         {
             return;
         }

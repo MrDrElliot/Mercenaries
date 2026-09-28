@@ -187,7 +187,8 @@ public sealed class Vehicle : EntityScript, IDamageable
         Mercs.Vehicles.Remove(this);
         Mercs.Unregister(this);
         HomeSite?.Forget(this);
-        if (Rider is not null)
+        // When the whole world is going away the player may already be gone, and there is nothing to put them back into.
+        if (Rider is not null && Rider.IsValid && Mercs.IsRunning)
         {
             Rider.ForceExitVehicle(Pos + new FVector3(0.0f, 2.0f, 0.0f));
         }

@@ -81,7 +81,8 @@ public static class Sfx
     private static SoundLoop? Ambience;
     private static bool bWarned;
 
-    public static FVector3 Listener => MercCamera.Instance?.ViewPosition ?? Mercs.PlayerPosition;
+    // The view actually on screen, so a cinematic camera hears what it shows rather than what the player's camera would.
+    public static FVector3 Listener { get; private set; }
 
     public static void Reset()
     {
@@ -225,6 +226,9 @@ public static class Sfx
 
     public static void Update()
     {
+        FVector3 View = CCameraLibrary.GetViewPosition(Mercs.World);
+        Listener = View.LengthSquared > 0.0f ? View : MercCamera.Instance?.ViewPosition ?? Mercs.PlayerPosition;
+
         FVector3 Head = Listener;
         foreach (Vehicle Ride in Mercs.Vehicles)
         {
