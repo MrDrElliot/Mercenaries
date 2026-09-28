@@ -1,0 +1,10 @@
+{
+    "ProjectSettings": {
+        "CookRoots": [
+            "/Game/Content/Maps/Venezuela.lasset"
+        ],
+        "EditorStartupMap": "/Game/Content/Maps/Venezuela.lasset",
+        "GameInstanceClass": "",
+        "GameStartupMap": "/Game/Content/Maps/Venezuela.lasset"
+    }
+}

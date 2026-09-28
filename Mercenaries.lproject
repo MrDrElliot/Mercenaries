@@ -1,0 +1,12 @@
+{
+    "Name": "Mercenaries",
+    "ProjectID": "27FDFBA3-D4C7-4551-A964-3B87D4A0B52C",
+    "Description": "Mercenaries 2 style open-world sandbox test project",
+    "Version": "0.0.1",
+    "Plugins": [
+        {
+            "Name": "MCP",
+            "Enabled": true
+        }
+    ]
+}

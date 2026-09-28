@@ -1,0 +1,499 @@
+{
+    "InputSettings": {
+        "Actions": [
+            {
+                "Name": "MoveForward",
+                "Type": "Axis1D",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "W",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    },
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "S",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": -1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "MoveRight",
+                "Type": "Axis1D",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "D",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    },
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "A",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": -1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Look",
+                "Type": "Axis2D",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "None",
+                            "Key": "Num",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "MouseX",
+                        "Channel": "X"
+                    },
+                    {
+                        "Key": {
+                            "Device": "None",
+                            "Key": "Num",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": -1.0,
+                        "Source": "MouseY",
+                        "Channel": "Y"
+                    }
+                ]
+            },
+            {
+                "Name": "Jump",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "Space",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Sprint",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "LeftShift",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Fire",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Mouse",
+                            "MouseButton": "ButtonLeft",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Aim",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Mouse",
+                            "MouseButton": "ButtonRight",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Reload",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "R",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Interact",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "E",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "SwitchWeapon",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "Q",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Grenade",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "G",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "PlaceCharge",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "C",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Detonate",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "V",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Melee",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "F",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "CallSupport",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "T",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "CycleSupport",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "X",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Pda",
+                "Type": "Digital",
+                "bRunsInUI": true,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "Tab",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Descend",
+                "Type": "Digital",
+                "bRunsInUI": false,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "LeftControl",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            },
+            {
+                "Name": "Help",
+                "Type": "Digital",
+                "bRunsInUI": true,
+                "DeadZone": 0.0,
+                "Sensitivity": 1.0,
+                "bInvert": false,
+                "HoldTime": 0.0,
+                "TapTime": 0.2,
+                "Bindings": [
+                    {
+                        "Key": {
+                            "Device": "Keyboard",
+                            "Key": "F1",
+                            "bShift": false,
+                            "bCtrl": false,
+                            "bAlt": false
+                        },
+                        "Scale": 1.0,
+                        "Source": "Key",
+                        "Channel": "X"
+                    }
+                ]
+            }
+        ],
+        "MappingContexts": []
+    }
+}

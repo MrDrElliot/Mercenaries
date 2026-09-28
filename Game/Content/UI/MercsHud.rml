@@ -1,0 +1,319 @@
+<rml>
+<head>
+    <title>Mercenaries HUD</title>
+    <style>
+        div, p, h1, h2 { display: block; }
+        span { display: inline; }
+        br { display: block; }
+
+        body
+        {
+            width: 100%;
+            height: 100%;
+            font-size: 16dp;
+            color: #f2eee6;
+        }
+
+        .hidden { display: none; }
+        .panel { background-color: #0b0d0fcc; border-radius: 6dp; padding: 8dp 10dp; }
+        .muted { color: #a8a39a; }
+        .small { font-size: 13dp; }
+        .big { font-size: 30dp; font-weight: bold; }
+        .accent { color: #f0922e; }
+
+        #flash { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #c01010; }
+
+        #crosshair { position: absolute; left: 50%; top: 50%; width: 22dp; height: 22dp; margin-left: -11dp; margin-top: -11dp; }
+        #crosshair .dot { position: absolute; left: 9dp; top: 9dp; width: 4dp; height: 4dp; border-radius: 2dp; background-color: #ffffffdd; }
+        #crosshair .ring { position: absolute; left: 0; top: 0; width: 18dp; height: 18dp; border: 2dp #ffffff88; border-radius: 11dp; }
+        #crosshair.hostile .dot { background-color: #ff3b2f; }
+        #crosshair.hostile .ring { border-color: #ff3b2fcc; }
+        #crosshair.aiming .ring { width: 10dp; height: 10dp; left: 4dp; top: 4dp; }
+        #hitmarker { position: absolute; left: 50%; top: 50%; width: 30dp; height: 30dp; margin-left: -15dp; margin-top: -15dp; border: 2dp #ffffffee; transform: rotate(45deg); }
+
+        #factions { position: absolute; left: 16dp; top: 16dp; width: 300dp; }
+        .frow { display: flex; flex-direction: row; align-items: center; margin-bottom: 3dp; }
+        .fbadge { width: 10dp; height: 18dp; margin-right: 6dp; border-radius: 2dp; }
+        .fname { width: 52dp; font-weight: bold; font-size: 14dp; }
+        .ftrack { width: 120dp; height: 8dp; background-color: #ffffff22; border-radius: 4dp; margin-right: 8dp; }
+        .ffill { height: 100%; border-radius: 4dp; background-color: #d9c24a; }
+        .fmood { font-size: 12dp; font-weight: bold; width: 80dp; }
+        .hostile { color: #ff5a4a; }
+        .neutral { color: #e8d45a; }
+        .friendly { color: #6ee06a; }
+        .frow.hostile .ffill { background-color: #ff5a4a; }
+        .frow.friendly .ffill { background-color: #6ee06a; }
+
+        #witness { margin-top: 8dp; background-color: #7a5a00dd; color: #ffe27a; font-weight: bold; }
+        #disguise { margin-top: 6dp; }
+        .strack { height: 6dp; background-color: #ffffff22; border-radius: 3dp; margin-top: 4dp; }
+        .sfill { height: 100%; background-color: #ff9a2e; border-radius: 3dp; }
+
+        #money { position: absolute; right: 16dp; top: 16dp; text-align: right; width: 300dp; }
+        #cash { font-size: 28dp; font-weight: bold; color: #7be07a; }
+        #fuel { font-size: 18dp; color: #ffb35a; }
+        #support { margin-top: 6dp; }
+
+        #objective { position: absolute; left: 50%; top: 16dp; width: 640dp; margin-left: -320dp; text-align: center; }
+        #compass { font-size: 13dp; color: #cfcac0; }
+
+        #banner { position: absolute; left: 50%; top: 24%; width: 900dp; margin-left: -450dp; text-align: center; }
+        #banner .title { font-size: 40dp; font-weight: bold; color: #ffd27a; font-effect: outline(2dp #000000); }
+        #banner .sub { font-size: 18dp; color: #f2eee6; font-effect: outline(1dp #000000); }
+
+        #feed { position: absolute; right: 16dp; top: 140dp; width: 380dp; text-align: right; }
+        .feedrow { font-size: 14dp; margin-bottom: 2dp; padding: 2dp 6dp; background-color: #00000077; border-radius: 3dp; }
+        .feedrow.good { color: #8fef8a; }
+        .feedrow.bad { color: #ff8a7a; }
+        .feedrow.money { color: #b8f59a; }
+        .feedrow.faction { color: #ffb86a; }
+        .feedrow.alert { color: #ffe066; font-weight: bold; }
+
+        #vitals { position: absolute; left: 16dp; bottom: 16dp; width: 320dp; }
+        #radar { position: relative; width: 160dp; height: 160dp; border-radius: 80dp; background-color: #0c1a12cc; border: 2dp #7bbf7b55; margin-bottom: 10dp; }
+        #radar .me { position: absolute; left: 76dp; top: 74dp; width: 8dp; height: 12dp; background-color: #ffffff; }
+        #radar .ring { position: absolute; left: 40dp; top: 40dp; width: 80dp; height: 80dp; border-radius: 40dp; border: 1dp #7bbf7b33; }
+        #radar .north { position: absolute; left: 70dp; top: -20dp; width: 20dp; text-align: center; font-size: 12dp; }
+        .blip { position: absolute; width: 8dp; height: 8dp; border-radius: 4dp; background-color: #d9d9d9; }
+        .blip.hostile { background-color: #ff3b2f; }
+        .blip.ally { background-color: #4ad0ff; }
+        .blip.neutral { background-color: #e8d45a; }
+        .blip.civilian { background-color: #bbbbbb; width: 5dp; height: 5dp; }
+        .blip.hvt { background-color: #ff1060; width: 12dp; height: 12dp; border-radius: 2dp; }
+        .blip.witness { background-color: #ffe000; width: 11dp; height: 11dp; }
+        .blip.objective { background-color: #ff9a1e; width: 12dp; height: 12dp; border-radius: 1dp; }
+        .blip.contact { background-color: #3a8cff; width: 10dp; height: 10dp; border-radius: 1dp; }
+        .blip.vehicle { background-color: #cfcfcf; border-radius: 1dp; }
+        .blip.vehicle-empty { background-color: #6ee06a; border-radius: 1dp; }
+        .blip.vehicle-hostile { background-color: #ff6a2a; border-radius: 1dp; }
+
+        .htrack { height: 14dp; background-color: #ffffff22; border-radius: 3dp; }
+        .hfill { height: 100%; background-color: #d8d8d8; border-radius: 3dp; }
+        #vitals.low .hfill { background-color: #ff4a3a; }
+
+        #weapons { position: absolute; right: 16dp; bottom: 16dp; width: 320dp; text-align: right; }
+        #ammo { font-size: 34dp; font-weight: bold; }
+        #reload { color: #ffcc55; font-weight: bold; }
+
+        #vehicle { position: absolute; left: 50%; bottom: 20dp; width: 360dp; margin-left: -180dp; text-align: center; }
+        #prompt { position: absolute; left: 50%; bottom: 110dp; width: 640dp; margin-left: -320dp; text-align: center; }
+        #prompt .panel { display: inline-block; font-size: 18dp; }
+
+        #hijack { position: absolute; left: 50%; top: 58%; width: 300dp; margin-left: -150dp; text-align: center; }
+        #hijack .key { font-size: 64dp; font-weight: bold; color: #ffe066; font-effect: outline(3dp #000000); }
+        .qtrack { height: 8dp; background-color: #ffffff33; border-radius: 4dp; }
+        .qfill { height: 100%; background-color: #ffe066; border-radius: 4dp; }
+
+        #dead { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-color: #30000088; }
+        #dead .title { position: absolute; left: 50%; top: 42%; width: 600dp; margin-left: -300dp; text-align: center; font-size: 44dp; font-weight: bold; color: #ff5a4a; }
+
+        #help { position: absolute; left: 50%; top: 50%; width: 560dp; margin-left: -280dp; margin-top: -250dp; }
+        .kv { display: flex; flex-direction: row; justify-content: space-between; font-size: 15dp; padding: 2dp 0; }
+        .kv .k { color: #f0922e; font-weight: bold; }
+
+        #pda { position: absolute; left: 50%; top: 50%; width: 980dp; height: 620dp; margin-left: -490dp; margin-top: -310dp; background-color: #101418f2; border: 2dp #f0922e88; border-radius: 10dp; padding: 16dp; }
+        #pda .tabs { display: flex; flex-direction: row; margin-bottom: 12dp; }
+        .tab { padding: 6dp 14dp; margin-right: 6dp; background-color: #252b31; border-radius: 5dp; font-weight: bold; }
+        .tab:hover { background-color: #3a434c; }
+        .tab.on { background-color: #f0922e; color: #111111; }
+        .close { position: absolute; right: 16dp; top: 16dp; padding: 6dp 12dp; background-color: #5a2a2a; border-radius: 5dp; font-weight: bold; }
+        .close:hover { background-color: #8a3a3a; }
+        .pbody { height: 540dp; overflow-y: auto; }
+        .card { width: 920dp; background-color: #1b2127; border-radius: 6dp; padding: 10dp 12dp; margin-bottom: 8dp; display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; align-items: center; }
+        .card.locked { opacity: 0.55; }
+        .card.selected { border: 2dp #f0922e; }
+        .card.focused { background-color: #2c3b4a; }
+        .grow { flex: 1 1 auto; width: 520dp; margin-right: 12dp; }
+        .btn { flex: 0 0 auto; white-space: nowrap; padding: 6dp 12dp; background-color: #2f6b3a; border-radius: 5dp; font-weight: bold; margin-left: 6dp; }
+        .btn:hover { background-color: #3f8b4a; }
+        .btn.alt { background-color: #3a4a5a; }
+        .btn.alt:hover { background-color: #4a5e72; }
+        .btn.warn { background-color: #7a3a1a; }
+        .swatch { flex: 0 0 auto; width: 12dp; height: 36dp; border-radius: 3dp; margin-right: 10dp; }
+    </style>
+</head>
+
+<body data-model="mercs">
+    <div id="flash" data-style-opacity="DamageFlash * 0.45"/>
+
+    <div id="crosshair" data-class-hostile="HostileAim" data-class-aiming="Aiming" data-class-hidden="InVehicle || Dead || PdaOpen">
+        <div class="ring"/>
+        <div class="dot"/>
+    </div>
+    <div id="hitmarker" data-if="HitMarker"/>
+
+    <div id="factions" data-class-hidden="PdaOpen">
+        <div class="panel">
+            <div class="frow" data-for="f : Factions" data-class-hostile="f.MoodClass == 'hostile'" data-class-friendly="f.MoodClass == 'friendly'">
+                <div class="fbadge" data-style-background-color="f.Color"></div>
+                <div class="fname">{{ f.Short }}</div>
+                <div class="ftrack"><div class="ffill" data-style-width="f.Bar + '%'"/></div>
+                <div class="fmood" data-class-hostile="f.MoodClass == 'hostile'" data-class-neutral="f.MoodClass == 'neutral'" data-class-friendly="f.MoodClass == 'friendly'">{{ f.Mood }}</div>
+            </div>
+        </div>
+        <div id="witness" class="panel" data-if="HasWitness">{{ Witness }}</div>
+        <div id="disguise" class="panel" data-if="HasDisguise">
+            <div>{{ Disguise }}</div>
+            <div class="strack"><div class="sfill" data-style-width="Suspicion + '%'"/></div>
+        </div>
+    </div>
+
+    <div id="objective" data-if="HasObjective">
+        <div class="panel">
+            <div><span class="accent">CONTRACT </span>{{ Objective }}</div>
+            <div class="muted small">{{ ObjectiveDistance }}</div>
+        </div>
+    </div>
+
+    <div id="banner" data-if="HasBanner">
+        <div class="title">{{ Banner }}</div>
+        <div class="sub">{{ BannerSub }}</div>
+    </div>
+
+    <div id="money">
+        <div id="cash">{{ Cash }}</div>
+        <div id="fuel">FUEL {{ Fuel }}</div>
+        <div id="support" class="panel small">[T] {{ SupportName }} <span class="muted">{{ SupportCount }}</span> <span class="muted">[X] cycle</span></div>
+        <div class="muted small" style="margin-top: 4dp;">[Tab] PDA   [F1] Controls</div>
+    </div>
+
+    <div id="feed" data-class-hidden="PdaOpen">
+        <div class="feedrow" data-for="n : Feed" data-class-good="n.Tone == 'good'" data-class-bad="n.Tone == 'bad'" data-class-money="n.Tone == 'money'" data-class-faction="n.Tone == 'faction'" data-class-alert="n.Tone == 'alert'">{{ n.Text }}</div>
+    </div>
+
+    <div id="vitals" data-class-low="LowHealth">
+        <div id="radar">
+            <div class="ring"/>
+            <div class="north">{{ Compass }}</div>
+            <div class="blip" data-for="b : Blips" data-class-hostile="b.Kind == 'hostile'" data-class-ally="b.Kind == 'ally'" data-class-neutral="b.Kind == 'neutral'" data-class-civilian="b.Kind == 'civilian'" data-class-hvt="b.Kind == 'hvt'" data-class-witness="b.Kind == 'witness'" data-class-objective="b.Kind == 'objective'" data-class-contact="b.Kind == 'contact'" data-class-vehicle="b.Kind == 'vehicle'" data-class-vehicle-empty="b.Kind == 'vehicle-empty'" data-class-vehicle-hostile="b.Kind == 'vehicle-hostile'" data-style-left="b.X + 'dp'" data-style-top="b.Y + 'dp'"></div>
+            <div class="me"/>
+        </div>
+        <div class="panel">
+            <div><span style="font-weight: bold;">{{ MercName }}</span> <span class="muted small">{{ HealthText }}</span></div>
+            <div class="htrack"><div class="hfill" data-style-width="Health + '%'"/></div>
+        </div>
+    </div>
+
+    <div id="weapons" data-class-hidden="InVehicle">
+        <div class="panel">
+            <div class="muted small">{{ OtherWeapon }}   [Q]</div>
+            <div>{{ WeaponName }}</div>
+            <div id="ammo">{{ Ammo }}</div>
+            <div id="reload" data-if="Reloading">RELOADING</div>
+            <div class="small">[G] Grenades {{ Grenades }}   [C] C4 {{ Charges }}   <span class="accent">[V] armed {{ ArmedCharges }}</span></div>
+        </div>
+    </div>
+
+    <div id="vehicle" data-if="InVehicle">
+        <div class="panel">
+            <div><span style="font-weight: bold;">{{ VehicleName }}</span>  <span class="muted">{{ VehicleSpeed }}</span></div>
+            <div class="htrack"><div class="hfill" data-style-width="VehicleHealth + '%'"/></div>
+            <div class="small muted">{{ VehicleWeapon }}</div>
+        </div>
+    </div>
+
+    <div id="prompt" data-if="HasPrompt">
+        <div class="panel">{{ Prompt }}</div>
+    </div>
+
+    <div id="hijack" data-if="InHijack">
+        <div class="key">{{ HijackKey }}</div>
+        <div class="qtrack"><div class="qfill" data-style-width="HijackTime + '%'"/></div>
+        <div class="small">{{ HijackProgress }}</div>
+    </div>
+
+    <div id="dead" data-if="Dead">
+        <div class="title">{{ RespawnText }}</div>
+    </div>
+
+    <div id="help" class="panel" data-if="Help">
+        <div class="big accent">CONTROLS</div>
+        <div class="kv"><span class="k">WASD / Mouse</span><span>Move / look</span></div>
+        <div class="kv"><span class="k">Shift / Space</span><span>Sprint / jump (vehicles: boost, heli climb)</span></div>
+        <div class="kv"><span class="k">LMB / RMB</span><span>Fire / aim (vehicles: main / secondary gun)</span></div>
+        <div class="kv"><span class="k">R / Q / Wheel</span><span>Reload / swap weapon</span></div>
+        <div class="kv"><span class="k">E</span><span>Enter, hijack, take weapon, contracts, capture HVT</span></div>
+        <div class="kv"><span class="k">F</span><span>Melee (beat an HVT down to capture them)</span></div>
+        <div class="kv"><span class="k">G / C / V</span><span>Grenade / throw C4 / detonate C4</span></div>
+        <div class="kv"><span class="k">T / X</span><span>Throw support beacon / cycle support</span></div>
+        <div class="kv"><span class="k">Ctrl</span><span>Helicopter descend</span></div>
+        <div class="kv"><span class="k">Tab</span><span>PDA: shop, factions, contracts, bounties, map</span></div>
+        <div class="muted small" style="margin-top: 8dp;">Faction crimes only count if a witness survives to report them. Stolen faction vehicles disguise you from that faction.</div>
+    </div>
+
+    <div id="pda" data-if="PdaOpen">
+        <div class="tabs">
+            <div class="tab" data-class-on="PdaTab == 'shop'" data-event-click="Tab('shop')">SHOP</div>
+            <div class="tab" data-class-on="PdaTab == 'factions'" data-event-click="Tab('factions')">FACTIONS</div>
+            <div class="tab" data-class-on="PdaTab == 'contracts'" data-event-click="Tab('contracts')">CONTRACTS</div>
+            <div class="tab" data-class-on="PdaTab == 'bounties'" data-event-click="Tab('bounties')">HVT BOUNTIES</div>
+            <div class="tab" data-class-on="PdaTab == 'map'" data-event-click="Tab('map')">LOCATIONS</div>
+            <div style="margin-left: 20dp;"><span class="accent" style="font-size: 22dp; font-weight: bold;">{{ Cash }}</span> <span class="muted">fuel {{ Fuel }}</span></div>
+        </div>
+        <div class="close" data-event-click="Close()">CLOSE [Tab]</div>
+        <div class="muted small" style="position: absolute; left: 16dp; bottom: 10dp;">[1-5] tabs   [W/S] select   [Enter] buy, bribe or accept   [Space] equip</div>
+
+        <div class="pbody" data-if="PdaTab == 'shop'">
+            <div class="card" data-for="s : Shop" data-class-locked="s.Locked" data-class-selected="s.Selected" data-class-focused="s.Focused">
+                <div class="grow">
+                    <div style="font-weight: bold;">{{ s.Name }} <span class="muted small">owned {{ s.Owned }}</span></div>
+                    <div class="small muted">{{ s.Blurb }}</div>
+                    <div class="small accent">{{ s.LockText }}</div>
+                </div>
+                <div class="small" style="width: 150dp; text-align: right;">{{ s.Price }}<br/><span class="muted">{{ s.FuelCost }}</span></div>
+                <div class="btn" data-if="!s.Locked" data-event-click="Buy(s.Id)">BUY</div>
+                <div class="btn alt" data-if="s.Owned > 0" data-event-click="Equip(s.Id)">EQUIP</div>
+            </div>
+        </div>
+
+        <div class="pbody" data-if="PdaTab == 'factions'">
+            <div class="card" data-for="f : Factions" data-class-focused="f.Focused">
+                <div class="swatch" data-style-background-color="f.Color"></div>
+                <div class="grow">
+                    <div style="font-weight: bold;">{{ f.Name }} <span data-class-hostile="f.MoodClass == 'hostile'" data-class-neutral="f.MoodClass == 'neutral'" data-class-friendly="f.MoodClass == 'friendly'">{{ f.Mood }}</span> <span class="muted small">standing {{ f.Standing }}</span></div>
+                    <div class="small muted">Unlocks: {{ f.Unlocks }}</div>
+                </div>
+                <div class="btn warn" data-if="f.CanBribe" data-event-click="Bribe(f.Id)">{{ f.BribeText }}</div>
+            </div>
+        </div>
+
+        <div class="pbody" data-if="PdaTab == 'contracts'">
+            <div class="panel" style="margin-bottom: 8dp; width: 920dp;" data-style-color="ContractFactionColor">{{ ContractFaction }}</div>
+            <div class="card" data-if="ActiveContract != ''">
+                <div class="grow"><span class="accent">ACTIVE </span>{{ ActiveContract }}</div>
+                <div class="btn warn" data-event-click="Abandon()">ABANDON</div>
+            </div>
+            <div class="card" data-for="c : Contracts" data-class-focused="c.Focused">
+                <div class="swatch" data-style-background-color="c.Color"></div>
+                <div class="grow">
+                    <div style="font-weight: bold;">{{ c.Title }} <span class="muted small">{{ c.Employer }}</span></div>
+                    <div class="small muted">{{ c.Description }}</div>
+                </div>
+                <div class="accent" style="width: 90dp; text-align: right;">{{ c.Reward }}</div>
+                <div class="btn" data-event-click="Accept(c.Id)">ACCEPT</div>
+            </div>
+        </div>
+
+        <div class="pbody" data-if="PdaTab == 'bounties'">
+            <div class="card" data-for="h : Bounties" data-class-locked="h.Resolved">
+                <div class="grow">
+                    <div style="font-weight: bold;">{{ h.Name }} <span class="muted small">{{ h.Title }}</span></div>
+                    <div class="small muted">{{ h.Where }}</div>
+                </div>
+                <div class="small" style="width: 250dp; text-align: right;">{{ h.Bounty }}<br/><span class="accent">{{ h.Status }}</span></div>
+            </div>
+        </div>
+
+        <div class="pbody" data-if="PdaTab == 'map'">
+            <div class="card" data-for="p : Places">
+                <div class="swatch" data-style-background-color="p.Color"></div>
+                <div class="grow">
+                    <div style="font-weight: bold;">{{ p.Name }}</div>
+                    <div class="small muted">{{ p.Owner }}  {{ p.Status }}</div>
+                </div>
+                <div class="small">{{ p.Distance }}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</rml>
