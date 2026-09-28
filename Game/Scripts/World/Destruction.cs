@@ -22,6 +22,7 @@ public sealed class DestructionSystem
         public FVector3 At;
         public float Scale;
         public float Yaw;
+        public int Variant;
         public bool bAlive = true;
     }
 
@@ -69,9 +70,10 @@ public sealed class DestructionSystem
 
     // The engine's instanced foliage draws the plants, and this grid only answers the gameplay queries.
     private readonly Dictionary<(int, int), List<FPlant>> Cells = new();
-    private readonly int[] FoliageTypes = new int[(int)EFoliageKind.Bush + 2];
-    private readonly CStaticMesh?[] FoliageMeshes = new CStaticMesh?[(int)EFoliageKind.Bush + 2];
-    private const int StumpType = (int)EFoliageKind.Bush + 1;
+    // One slot per kind and variant, with the stump after them.
+    private const int StumpType = ((int)EFoliageKind.Bush + 1) * FoliageShapes.Variants;
+    private readonly int[] FoliageTypes = new int[StumpType + 1];
+    private readonly CStaticMesh?[] FoliageMeshes = new CStaticMesh?[StumpType + 1];
     private readonly List<FFalling> Falling = new();
     private readonly List<FSinking> Sinking = new();
     private readonly List<FBurning> Burning = new();
@@ -97,7 +99,25 @@ public sealed class DestructionSystem
             Cells[Key] = Plants;
         }
 
-        Plants.Add(new FPlant { Kind = Kind, At = At, Scale = Scale, Yaw = Yaw });
+        // From the position, so a rebuilt world grows the same tree in the same place.
+        int Variant = (int)((uint)((int)MathF.Floor(At.X * 7.0f) * 73856093 ^ (int)MathF.Floor(At.Z * 7.0f) * 19349663) % FoliageShapes.Variants);
+        Plants.Add(new FPlant { Kind = Kind, At = At, Scale = Scale, Yaw = Yaw, Variant = Variant });
+    }
+
+    // The Nth living plant of a kind in grid order, for debug tools that want to look at one.
+    public FVector3? PlantOf(EFoliageKind Kind, int Index)
+    {
+        foreach (List<FPlant> Plants in Cells.Values)
+        {
+            foreach (FPlant Plant in Plants)
+            {
+                if (Plant.bAlive && Plant.Kind == Kind && Index-- == 0)
+                {
+                    return Plant.At;
+                }
+            }
+        }
+        return null;
     }
 
     public void CommitFoliage()
@@ -107,15 +127,16 @@ public sealed class DestructionSystem
             MeshKit Kit = new();
             if (Type == StumpType)
             {
-                FoliageShapes.Stump(Kit, FVector3.Zero, 1.0f);
+                FoliageShapes.Stump(Kit);
             }
             else
             {
-                FoliageShapes.Draw(Kit, (EFoliageKind)Type, FVector3.Zero, 1.0f, 0.0f);
+                FoliageShapes.Draw(Kit, (EFoliageKind)(Type / FoliageShapes.Variants), Type % FoliageShapes.Variants);
             }
 
-            FoliageMeshes[Type] = Kit.BuildStaticMesh(Mercs.World);
-            FoliageTypes[Type] = CFoliageLibrary.AddFoliageType(Mercs.World, FoliageMeshes[Type]!, Type != (int)EFoliageKind.Bush, 700.0f);
+            FoliageMeshes[Type] = Kit.BuildStaticMesh(Mercs.World, Materials.Foliage, 3);
+            bool bCastShadow = Type / FoliageShapes.Variants != (int)EFoliageKind.Bush;
+            FoliageTypes[Type] = CFoliageLibrary.AddFoliageType(Mercs.World, FoliageMeshes[Type]!, bCastShadow, 700.0f);
         }
 
         List<SFoliageInstance> Instances = new();
@@ -123,12 +144,14 @@ public sealed class DestructionSystem
         {
             foreach (FPlant Plant in Plants)
             {
-                Instances.Add(InstanceOf((int)Plant.Kind, Plant.At, Plant.Scale, Plant.Yaw));
+                Instances.Add(InstanceOf(SlotOf(Plant), Plant.At, Plant.Scale, Plant.Yaw));
             }
         }
 
         CFoliageLibrary.AddFoliageInstances(Mercs.World, CollectionsMarshal.AsSpan(Instances));
     }
+
+    private static int SlotOf(FPlant Plant) => (int)Plant.Kind * FoliageShapes.Variants + Plant.Variant;
 
     private SFoliageInstance InstanceOf(int Type, FVector3 At, float Scale, float Yaw)
     {
@@ -219,7 +242,7 @@ public sealed class DestructionSystem
     private void Knock(FPlant Plant, FVector3 Push)
     {
         Plant.bAlive = false;
-        CFoliageLibrary.RemoveFoliageInRadius(Mercs.World, Plant.At, 0.05f, FoliageTypes[(int)Plant.Kind]);
+        CFoliageLibrary.RemoveFoliageInRadius(Mercs.World, Plant.At, 0.05f, FoliageTypes[SlotOf(Plant)]);
         if (Plant.Kind != EFoliageKind.Bush)
         {
             SFoliageInstance Stump = InstanceOf(StumpType, Plant.At, Plant.Scale, Plant.Yaw);
@@ -240,7 +263,7 @@ public sealed class DestructionSystem
 
         FQuat Facing = FQuat.FromEuler(0.0f, Mathf.Radians(Plant.Yaw), 0.0f);
         Entity Handle = Mercs.World.CreateEntity("FallingTree", Plant.At, Facing, new FVector3(Plant.Scale));
-        MeshKit.Show(Mercs.World.Registry, Handle, FoliageMeshes[(int)Plant.Kind]);
+        MeshKit.Show(Mercs.World.Registry, Handle, FoliageMeshes[SlotOf(Plant)]);
 
         FVector3 Direction = Geo.Flat(Push).NormalizedOr(Geo.Heading(Mercs.Range(0.0f, 360.0f)));
         Falling.Add(new FFalling
@@ -572,67 +595,5 @@ public sealed class DestructionSystem
 
             Target.Burn(DeltaTime);
         }
-    }
-}
-
-public static class FoliageShapes
-{
-    public static float HeightOf(EFoliageKind Kind, float Scale) => Kind switch
-    {
-        EFoliageKind.JungleTree => 9.0f * Scale,
-        EFoliageKind.Palm => 8.0f * Scale,
-        EFoliageKind.Bush => 1.2f * Scale,
-        _ => 6.0f * Scale,
-    };
-
-    public static void Draw(MeshKit Kit, EFoliageKind Kind, FVector3 At, float Scale, float Yaw)
-    {
-        switch (Kind)
-        {
-            case EFoliageKind.Tree:
-            case EFoliageKind.JungleTree:
-                Tree(Kit, At, Scale, Kind == EFoliageKind.JungleTree);
-                break;
-            case EFoliageKind.Palm:
-                Palm(Kit, At, Scale, Yaw);
-                break;
-            case EFoliageKind.Bush:
-                Bush(Kit, At, Scale);
-                break;
-        }
-    }
-
-    public static void Tree(MeshKit Kit, FVector3 At, float Scale, bool bJungle)
-    {
-        float Height = (bJungle ? 9.0f : 6.0f) * Scale;
-        Kit.Tube(At, At + new FVector3(0.0f, Height * 0.6f, 0.0f), 0.25f * Scale, 0.18f * Scale, Palette.TreeTrunk, 5);
-        FVector4 Leaves = bJungle ? Palette.Shade(Palette.Leaves, 0.85f) : Palette.Leaves;
-        Kit.Sphere(At + new FVector3(0.0f, Height * 0.7f, 0.0f), Height * 0.32f, Leaves, 6);
-        Kit.Sphere(At + new FVector3(Height * 0.15f, Height * 0.85f, 0.1f), Height * 0.24f, Palette.Shade(Leaves, 1.1f), 6);
-    }
-
-    public static void Palm(MeshKit Kit, FVector3 At, float Scale, float Yaw)
-    {
-        float Height = 8.0f * Scale;
-        FVector3 Lean = Geo.Heading(Yaw) * (1.2f * Scale);
-        FVector3 Top = At + new FVector3(Lean.X, Height, Lean.Z);
-        Kit.Tube(At, Top, 0.22f * Scale, 0.14f * Scale, Palette.Hex(0x8A6E4B), 5);
-        for (int Frond = 0; Frond < 6; ++Frond)
-        {
-            FVector3 Out = Geo.Heading(Yaw + Frond * 60.0f) * (3.0f * Scale);
-            Kit.Tube(Top, Top + Out + new FVector3(0.0f, -1.2f * Scale, 0.0f), 0.45f * Scale, 0.05f * Scale, Palette.PalmLeaves, 3, false);
-        }
-    }
-
-    public static void Bush(MeshKit Kit, FVector3 At, float Scale)
-    {
-        Kit.Sphere(At + new FVector3(0.0f, 0.5f * Scale, 0.0f), 0.9f * Scale, Palette.Shade(Palette.Jungle, 1.1f), 5);
-        Kit.Sphere(At + new FVector3(0.6f * Scale, 0.4f * Scale, 0.3f), 0.6f * Scale, Palette.Jungle, 5);
-    }
-
-    public static void Stump(MeshKit Kit, FVector3 At, float Scale)
-    {
-        Kit.Tube(At, At + new FVector3(0.0f, 0.5f * Scale, 0.0f), 0.26f * Scale, 0.22f * Scale, Palette.TreeTrunk, 5);
-        Kit.Cylinder(At + new FVector3(0.0f, 0.5f * Scale, 0.0f), 0.2f * Scale, 0.03f, Palette.Hex(0xC9A66B), 5);
     }
 }

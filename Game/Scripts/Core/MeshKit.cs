@@ -9,19 +9,25 @@ public static class Materials
 {
     public const string SolidPath = "/Game/Content/Materials/M_VertexColor.lasset";
     public const string GlowPath = "/Game/Content/Materials/M_VertexColorGlow.lasset";
+    public const string FoliagePath = "/Game/Content/Materials/M_Foliage.lasset";
 
     private static CMaterialInterface? SolidMaterial;
     private static CMaterialInterface? GlowMaterial;
+    private static CMaterialInterface? FoliageMaterial;
     private static bool bWarned;
 
     public static CMaterialInterface? Solid => SolidMaterial ??= Load(SolidPath);
 
     public static CMaterialInterface? Glow => GlowMaterial ??= Load(GlowPath);
 
+    // Vertex color with wind weighted by vertex alpha, falling back to the plain one until Tools/AuthorFoliage.py has run.
+    public static CMaterialInterface? Foliage => FoliageMaterial ??= Asset.Load<CMaterialInterface>(FoliagePath) ?? Solid;
+
     public static void Reset()
     {
         SolidMaterial = null;
         GlowMaterial = null;
+        FoliageMaterial = null;
     }
 
     private static CMaterialInterface? Load(string Path)

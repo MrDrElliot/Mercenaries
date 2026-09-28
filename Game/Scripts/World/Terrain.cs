@@ -238,7 +238,7 @@ public static class Terrain
 
         // Species come from the material's grass outputs; the component only switches the scatter on and bounds it.
         SGrassComponent Grass = Registry.GetOrAdd<SGrassComponent>(Ground)!;
-        Grass.MaxDrawDistance = 75.0f;
+        Grass.MaxDrawDistance = 150.0f;
         Grass.MaxInstancesPerSpecies = 1u << 17;
 
         BuildSea(World, Registry);
@@ -294,10 +294,10 @@ public static class Terrain
         Water.GridResolution = 512;
         // Out to the camera's far plane, so the sea meets the sky at the horizon instead of ending a few kilometers out.
         Water.HorizonExtent = 60000.0f;
-        Water.WaveAmplitude = 0.35f;
-        Water.WaveLength = 28.0f;
+        Water.WaveAmplitude = 0.5f;
+        Water.WaveLength = 55.0f;
         Water.WindSpeed = 6.0f;
-        Water.Choppiness = 0.5f;
+        Water.Choppiness = 0.55f;
         Water.ShallowColor = new FVector3(0.12f, 0.62f, 0.62f);
         Water.DeepColor = new FVector3(0.02f, 0.16f, 0.30f);
         Water.bBuoyancy = true;

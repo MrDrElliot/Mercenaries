@@ -98,18 +98,19 @@ public static class HumanoidBody
             EFaction.Civilian => Shirt,
             _ => Palette.Shade(Info.Color, 0.8f),
         };
-        FVector4 Skin = Faction is EFaction.Pirate or EFaction.Guerrilla ? Palette.SkinDark : Palette.Skin;
+        // Picked from the entity, so each soldier keeps one face for as long as it exists.
+        int Variant = (int)((Parent.Id * 2654435761u) >> 28) % HumanoidShapes.Variants;
+        FVector4 Skin = HumanoidShapes.SkinFor(Faction, Variant);
+        FVector4 Hair = HumanoidShapes.HairFor(Variant);
+        bool bMilitary = Faction != EFaction.Civilian;
+        bool bRolledSleeves = Faction is EFaction.Guerrilla or EFaction.Pirate or EFaction.Civilian;
+        FVector4 Glove = Faction is EFaction.Merc or EFaction.Allied or EFaction.China ? Palette.Hex(0x23211D) : Skin;
 
         MeshKit[] Kits = new MeshKit[HumanoidRig.PartCount];
         for (int Index = 0; Index < Kits.Length; ++Index)
         {
             Kits[Index] = new MeshKit();
         }
-        MeshKit Torso = Kits[(int)EBodyPart.Torso];
-        MeshKit Head = Kits[(int)EBodyPart.Head];
-        MeshKit ArmR = Kits[(int)EBodyPart.ArmR];
-        MeshKit ArmL = Kits[(int)EBodyPart.ArmL];
-        MeshKit Gun = Kits[(int)EBodyPart.Weapon];
 
         HumanoidRig Rig = new() { Scale = Scale };
         float Feet = -FeetOffset;
@@ -117,74 +118,65 @@ public static class HumanoidBody
         for (int Side = 0; Side < 2; ++Side)
         {
             float X = Side == 0 ? 0.11f : -0.11f;
-            MeshKit Leg = Kits[(int)(Side == 0 ? EBodyPart.LegR : EBodyPart.LegL)];
-            Leg.Box(new FVector3(X, Feet + 0.06f, 0.03f), new FVector3(0.08f, 0.06f, 0.13f), Palette.Rubber);
-            Leg.Box(new FVector3(X, Feet + 0.44f, 0.0f), new FVector3(0.085f, 0.32f, 0.1f), Pants);
-            Rig.SetBounds(Side == 0 ? EBodyPart.LegR : EBodyPart.LegL, new FVector3(X, Feet + 0.38f, 0.03f), new FVector3(0.09f, 0.38f, 0.12f));
+            EBodyPart Part = Side == 0 ? EBodyPart.LegR : EBodyPart.LegL;
+            HumanoidShapes.Leg(Kits[(int)Part], X, Feet, Pants, Palette.Rubber, bMilitary && Variant % 2 == 0);
+            Rig.SetBounds(Part, new FVector3(X, Feet + 0.4f, 0.03f), new FVector3(0.1f, 0.42f, 0.13f));
         }
 
-        Torso.Box(new FVector3(0.0f, Feet + 0.8f, 0.0f), new FVector3(0.21f, 0.08f, 0.12f), Pants);
-        Torso.Box(new FVector3(0.0f, Feet + 1.13f, 0.0f), new FVector3(0.23f, 0.27f, 0.14f), Shirt);
-        if (Faction != EFaction.Civilian)
-        {
-            Torso.Box(new FVector3(0.0f, Feet + 1.12f, 0.0f), new FVector3(0.245f, 0.19f, 0.155f), Vest);
-            Torso.Box(new FVector3(0.0f, Feet + 0.87f, 0.0f), new FVector3(0.235f, 0.035f, 0.15f), Palette.Hex(0x2A2418));
-        }
-        Rig.SetBounds(EBodyPart.Torso, new FVector3(0.0f, Feet + 1.06f, 0.0f), new FVector3(0.24f, 0.34f, 0.15f));
+        HumanoidShapes.Torso(Kits[(int)EBodyPart.Torso], Feet, Shirt, Pants, Skin, bMilitary ? Vest : null, Palette.Hex(0x2A2418), Faction == EFaction.Merc || bOfficer);
+        Rig.SetBounds(EBodyPart.Torso, new FVector3(0.0f, Feet + 1.06f, 0.0f), new FVector3(0.25f, 0.34f, 0.17f));
 
-        Head.Box(new FVector3(0.0f, Feet + 1.44f, 0.0f), new FVector3(0.06f, 0.04f, 0.06f), Skin);
-        Head.Box(new FVector3(0.0f, Feet + 1.58f, 0.01f), new FVector3(0.12f, 0.13f, 0.12f), Skin);
-        Head.Box(new FVector3(0.0f, Feet + 1.6f, 0.125f), new FVector3(0.08f, 0.02f, 0.01f), Palette.Hex(0x151515));
-        AddHeadgear(Head, HeadgearFor(Faction, bOfficer), Feet + 1.58f, Info, Faction);
-        Rig.SetBounds(EBodyPart.Head, new FVector3(0.0f, Feet + 1.6f, 0.01f), new FVector3(0.13f, 0.19f, 0.13f));
+        EHeadgear Gear = HeadgearFor(Faction, bOfficer);
+        bool bBeard = Faction is EFaction.Pirate or EFaction.Guerrilla && Variant != 0;
+        HumanoidShapes.Head(Kits[(int)EBodyPart.Head], Feet, Skin, Hair, Gear is EHeadgear.None or EHeadgear.Beret, bBeard);
+        HumanoidShapes.Headgear(Kits[(int)EBodyPart.Head], Feet, Gear, HeadgearColor(Faction, Info), Info.Accent, Faction == EFaction.Merc ? Palette.Hex(0xE07A1F) : HeadgearColor(Faction, Info));
+        Rig.SetBounds(EBodyPart.Head, new FVector3(0.0f, Feet + 1.6f, 0.01f), new FVector3(0.14f, 0.19f, 0.14f));
 
-        FVector3 ShoulderR = new(0.28f, Feet + 1.32f, 0.0f);
-        FVector3 ShoulderL = new(-0.28f, Feet + 1.32f, 0.0f);
+        FVector3 ShoulderR = new(0.26f, Feet + 1.31f, 0.0f);
+        FVector3 ShoulderL = new(-0.26f, Feet + 1.31f, 0.0f);
         FVector3 HandR;
         FVector3 HandL;
+        MeshKit Gun = Kits[(int)EBodyPart.Weapon];
+        FVector3 PoleR;
+        FVector3 PoleL;
         if (Weapon == EWeapon.None)
         {
-            HandR = ShoulderR + new FVector3(0.04f, -0.55f, 0.04f);
-            HandL = ShoulderL + new FVector3(-0.04f, -0.55f, 0.04f);
+            HandR = ShoulderR + new FVector3(0.05f, -0.54f, 0.05f);
+            HandL = ShoulderL + new FVector3(-0.05f, -0.54f, 0.05f);
+            PoleR = new FVector3(0.2f, 0.0f, -1.0f);
+            PoleL = new FVector3(-0.2f, 0.0f, -1.0f);
         }
         else if (Weapon is EWeapon.Rocket)
         {
             HandR = new FVector3(0.18f, Feet + 1.4f, 0.25f);
             HandL = new FVector3(0.05f, Feet + 1.3f, 0.3f);
-            Gun.Tube(new FVector3(0.2f, Feet + 1.52f, -0.5f), new FVector3(0.2f, Feet + 1.52f, 0.6f), 0.08f, 0.08f, Palette.Hex(0x4A5234), 7);
-            Rig.SetBounds(EBodyPart.Weapon, new FVector3(0.2f, Feet + 1.52f, 0.05f), new FVector3(0.08f, 0.08f, 0.55f));
+            PoleR = new FVector3(1.0f, -1.0f, -0.3f);
+            PoleL = new FVector3(-1.0f, -1.0f, -0.3f);
+            HumanoidShapes.Launcher(Gun, new FVector3(0.2f, Feet + 1.52f, 0.6f), new FVector3(0.2f, Feet + 1.52f, -0.5f), out FVector3 Center, out FVector3 Half);
+            Rig.SetBounds(EBodyPart.Weapon, Center, Half);
         }
         else
         {
-            HandR = new FVector3(0.12f, Feet + 1.12f, 0.32f);
-            HandL = new FVector3(0.02f, Feet + 1.16f, 0.5f);
-            float Length = Weapon switch
-            {
-                EWeapon.Pistol => 0.18f,
-                EWeapon.Smg => 0.3f,
-                EWeapon.Sniper => 0.62f,
-                EWeapon.MachineGun => 0.55f,
-                _ => 0.45f,
-            };
-            FVector3 Barrel = new(0.07f, Feet + 1.16f, 0.35f + Length * 0.3f);
-            Gun.Box(Barrel, new FVector3(0.035f, 0.06f, Length), Palette.Gunmetal);
-            if (Weapon == EWeapon.Sniper)
-            {
-                Gun.Box(new FVector3(0.07f, Feet + 1.25f, 0.4f), new FVector3(0.025f, 0.025f, 0.12f), Palette.Rubber);
-            }
-            Rig.SetBounds(EBodyPart.Weapon, Barrel, new FVector3(0.04f, 0.08f, Length));
+            HandR = new FVector3(0.12f, Feet + 1.12f, 0.3f);
+            HandL = new FVector3(0.05f, Feet + 1.15f, 0.52f);
+            PoleR = new FVector3(1.0f, -1.2f, -0.2f);
+            PoleL = new FVector3(-1.0f, -1.4f, 0.0f);
+            bool bWood = Faction is EFaction.VZ or EFaction.Guerrilla or EFaction.Pirate;
+            HumanoidShapes.Firearm(Gun, Weapon, HandR, bWood, out FVector3 Center, out FVector3 Half);
+            Rig.SetBounds(EBodyPart.Weapon, Center, Half);
         }
 
-        ArmR.Tube(ShoulderR, HandR, 0.065f, 0.055f, Shirt, 6);
-        ArmL.Tube(ShoulderL, HandL, 0.065f, 0.055f, Shirt, 6);
-        Rig.SetSpan(EBodyPart.ArmR, ShoulderR, HandR, 0.065f);
-        Rig.SetSpan(EBodyPart.ArmL, ShoulderL, HandL, 0.065f);
+        FVector4 Forearm = bRolledSleeves ? Skin : Palette.Shade(Shirt, 0.95f);
+        HumanoidShapes.Arm(Kits[(int)EBodyPart.ArmR], ShoulderR, HandR, PoleR, Shirt, Forearm, Glove);
+        HumanoidShapes.Arm(Kits[(int)EBodyPart.ArmL], ShoulderL, HandL, PoleL, Shirt, Forearm, Glove);
+        Rig.SetSpan(EBodyPart.ArmR, ShoulderR, HandR, 0.08f);
+        Rig.SetSpan(EBodyPart.ArmL, ShoulderL, HandL, 0.08f);
 
         Rig.Body = World.CreateEntity("Body", FVector3.Zero, null, new FVector3(Scale));
         World.SetParent(Rig.Body, Parent);
         World.Registry.Get<STransformComponent>(Rig.Body).SetLocalLocation(FVector3.Zero);
 
-        string Look = $"{Faction}|{Weapon}|{bOfficer}|{ShirtOverride}";
+        string Look = $"{Faction}|{Weapon}|{bOfficer}|{ShirtOverride}|{Variant}";
         for (int Index = 0; Index < HumanoidRig.PartCount; ++Index)
         {
             if (Kits[Index].IsEmpty)
@@ -195,7 +187,7 @@ public static class HumanoidBody
             string Key = $"{Look}|{Index}";
             if (!PartMeshes.TryGetValue(Key, out CStaticMesh? Mesh))
             {
-                Mesh = Kits[Index].BuildStaticMesh(World);
+                Mesh = Kits[Index].BuildStaticMesh(World, Materials.Solid, 3);
                 if (Mesh is not null)
                 {
                     World.RetainObject(Mesh);
@@ -214,43 +206,13 @@ public static class HumanoidBody
         return Rig;
     }
 
-    private static void AddHeadgear(MeshKit Kit, EHeadgear Gear, float HeadY, FactionInfo Info, EFaction Faction)
+    private static FVector4 HeadgearColor(EFaction Faction, FactionInfo Info) => Faction switch
     {
-        FVector4 Color = Faction switch
-        {
-            EFaction.Allied => Palette.Hex(0x4F8FD6),
-            EFaction.Oil => Palette.Hex(0xF2C230),
-            EFaction.Merc => Palette.Hex(0x1E1E1E),
-            _ => Palette.Shade(Info.Color, 0.85f),
-        };
-
-        switch (Gear)
-        {
-            case EHeadgear.Helmet:
-                Kit.Box(new FVector3(0.0f, HeadY + 0.1f, 0.0f), new FVector3(0.15f, 0.08f, 0.15f), Color);
-                Kit.Box(new FVector3(0.0f, HeadY + 0.04f, 0.0f), new FVector3(0.155f, 0.025f, 0.155f), Palette.Shade(Color, 0.8f));
-                break;
-            case EHeadgear.Cap:
-                Kit.Box(new FVector3(0.0f, HeadY + 0.13f, 0.0f), new FVector3(0.13f, 0.045f, 0.13f), Color);
-                Kit.Box(new FVector3(0.0f, HeadY + 0.1f, 0.17f), new FVector3(0.1f, 0.012f, 0.06f), Faction == EFaction.Merc ? Palette.Hex(0xE07A1F) : Color);
-                break;
-            case EHeadgear.Beret:
-                Kit.Box(new FVector3(0.03f, HeadY + 0.14f, 0.0f), new FVector3(0.14f, 0.035f, 0.13f), Info.Accent);
-                break;
-            case EHeadgear.HardHat:
-                Kit.Box(new FVector3(0.0f, HeadY + 0.12f, 0.0f), new FVector3(0.14f, 0.06f, 0.14f), Color);
-                Kit.Box(new FVector3(0.0f, HeadY + 0.07f, 0.02f), new FVector3(0.17f, 0.012f, 0.18f), Color);
-                break;
-            case EHeadgear.Bandana:
-                Kit.Box(new FVector3(0.0f, HeadY + 0.1f, 0.0f), new FVector3(0.13f, 0.05f, 0.13f), Info.Color);
-                Kit.Box(new FVector3(0.0f, HeadY + 0.06f, -0.15f), new FVector3(0.04f, 0.08f, 0.03f), Info.Accent);
-                break;
-            case EHeadgear.Boonie:
-                Kit.Box(new FVector3(0.0f, HeadY + 0.12f, 0.0f), new FVector3(0.13f, 0.05f, 0.13f), Color);
-                Kit.Box(new FVector3(0.0f, HeadY + 0.07f, 0.0f), new FVector3(0.21f, 0.012f, 0.21f), Color);
-                break;
-        }
-    }
+        EFaction.Allied => Palette.Hex(0x4F8FD6),
+        EFaction.Oil => Palette.Hex(0xF2C230),
+        EFaction.Merc => Palette.Hex(0x1E1E1E),
+        _ => Palette.Shade(Info.Color, 0.85f),
+    };
 
     public static Entity BuildMarker(CWorld World, Entity Parent, EMarker Kind, float Height = 1.5f)
     {
@@ -352,6 +314,49 @@ public static class HumanoidBody
 
         FQuat Turn = FQuat.AngleAxis(Mathf.Radians(Degrees), FVector3.Right);
         Transform.SetLocalTransform(new FTransform(Joint - Turn.Rotate(Joint), Turn, FVector3.One));
+    }
+
+    private const float SeatedLegDegrees = -78.0f;
+    private const float SeatedArmDegrees = -52.0f;
+
+    // Thighs forward under the dash and both hands out on the wheel, with the weapon stowed.
+    public static void PoseSeated(EntityRegistry Registry, HumanoidRig? Rig)
+    {
+        if (Rig is null || Rig.Body.IsNull)
+        {
+            return;
+        }
+
+        Registry.TryGet<STransformComponent>(Rig.Body)?.SetLocalTransform(new FTransform(FVector3.Zero, FQuat.Identity, FVector3.One));
+        SwingPart(Registry, Rig, EBodyPart.LegR, SeatedLegDegrees);
+        SwingPart(Registry, Rig, EBodyPart.LegL, SeatedLegDegrees);
+        SwingPart(Registry, Rig, EBodyPart.ArmR, SeatedArmDegrees);
+        SwingPart(Registry, Rig, EBodyPart.ArmL, SeatedArmDegrees);
+        SetWeaponShown(Registry, Rig, false);
+    }
+
+    // Back to standing, since an armed walk never touches the arms and would keep them on the wheel.
+    public static void ResetLimbs(EntityRegistry Registry, HumanoidRig? Rig)
+    {
+        if (Rig is null || Rig.Body.IsNull)
+        {
+            return;
+        }
+
+        SwingPart(Registry, Rig, EBodyPart.LegR, 0.0f);
+        SwingPart(Registry, Rig, EBodyPart.LegL, 0.0f);
+        SwingPart(Registry, Rig, EBodyPart.ArmR, 0.0f);
+        SwingPart(Registry, Rig, EBodyPart.ArmL, 0.0f);
+        SetWeaponShown(Registry, Rig, true);
+    }
+
+    private static void SetWeaponShown(EntityRegistry Registry, HumanoidRig Rig, bool bShown)
+    {
+        Entity Weapon = Rig.Parts[(int)EBodyPart.Weapon];
+        if (!Weapon.IsNull && Registry.TryGet<STransformComponent>(Weapon) is { } Transform)
+        {
+            Transform.SetLocalScale(bShown ? FVector3.One : new FVector3(0.001f));
+        }
     }
 
     public static void PoseDead(STransformComponent? Body, float Yaw)

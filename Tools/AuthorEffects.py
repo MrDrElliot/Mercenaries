@@ -151,24 +151,34 @@ def Effects(Assets):
 
     return {
         "P_Explosion": [
-            Emitter("Flash", Burst(1, BlendMode="Additive", SoftFadeDistance=1.0), [
-                Size(9.0, 9.0), Life(0.16, 0.16),
-                ColorOverLife((0.0, (30.0, 20.0, 11.0, 1.0)), (1.0, (6.0, 2.5, 0.8, 0.0))),
-                SizeOverLife((0.0, 0.7), (1.0, 1.2)),
+            Emitter("Flash", Burst(1, BlendMode="Additive", SoftFadeDistance=1.0, CameraFadeDistance=4.0), [
+                Size(6.0, 6.0), Life(0.09, 0.09),
+                ColorOverLife((0.0, (12.0, 8.0, 4.0, 1.0)), (1.0, (3.0, 1.2, 0.3, 0.0))),
+                SizeOverLife((0.0, 0.6), (1.0, 1.3)),
                 Integrate]),
-            Emitter("Fireball", Burst(36, BlendMode="Additive", Texture=Flame, SoftFadeDistance=1.0), [
-                Location("Hemisphere", (1.0, 1.0, 1.0)), RadialVelocity(3.0, 9.0),
-                Size(1.6, 3.0), Life(0.45, 0.9), Spin(70.0),
-                Drag(4.0), Gravity(0.0, 3.0),
-                ColorOverLife((0.0, (9.0, 6.5, 3.5, 1.0)), (0.2, (6.0, 2.4, 0.6, 1.0)), (0.6, (1.4, 0.3, 0.05, 0.6)), (1.0, (0.2, 0.04, 0.01, 0.0))),
-                SizeOverLife((0.0, 0.5), (0.3, 1.2), (1.0, 1.5)),
+            # Alpha blended so the billows keep their shape and cool from yellow to soot, where additive sprites sum to a white dome.
+            Emitter("Fireball", Burst(22, BlendMode="Alpha", Texture=Flame, SoftFadeDistance=1.5, CameraFadeDistance=4.0), [
+                Location("Hemisphere", (1.2, 1.2, 1.2)), RadialVelocity(2.5, 7.5),
+                Size(2.2, 3.6), Life(0.7, 1.3), Spin(50.0),
+                Drag(3.0), Gravity(0.0, 4.0), Turbulence((1.0, 0.6, 1.0), 0.3, 0.8),
+                ColorOverLife((0.0, (7.0, 4.6, 1.8, 1.0)), (0.12, (4.5, 1.9, 0.45, 1.0)), (0.35, (1.6, 0.45, 0.08, 0.95)),
+                              (0.6, (0.25, 0.08, 0.03, 0.85)), (1.0, (0.05, 0.04, 0.035, 0.0))),
+                SizeOverLife((0.0, 0.45), (0.25, 1.1), (1.0, 1.6)),
                 Integrate]),
-            Emitter("Smoke", Burst(24, BlendMode="Alpha", Texture=Smoke, SoftFadeDistance=1.0, bLit=True, bCastShadows=True), [
-                Location("Hemisphere", (1.2, 1.2, 1.2)), RadialVelocity(1.0, 3.5),
-                Size(1.6, 2.6), Life(3.5, 6.0), Spin(15.0),
-                Drag(1.5), Gravity(0.0, 1.8), Turbulence((1.0, 0.5, 1.0), 0.25, 0.4),
-                ColorOverLife((0.0, (0.1, 0.09, 0.08, 0.0)), (0.05, (0.12, 0.11, 0.1, 1.0)), (0.45, (0.3, 0.29, 0.27, 0.8)), (1.0, (0.5, 0.5, 0.5, 0.0))),
-                SizeOverLife((0.0, 0.6), (0.4, 1.3), (1.0, 1.8)),
+            Emitter("Smoke", Burst(30, BlendMode="Alpha", Texture=Smoke, SoftFadeDistance=1.5, bLit=True, bCastShadows=True, CameraFadeDistance=3.0), [
+                Location("Hemisphere", (1.6, 1.6, 1.6)), RadialVelocity(1.0, 3.0),
+                Size(2.4, 3.8), Life(5.0, 9.0), Spin(12.0),
+                Drag(1.2), Gravity(0.0, 2.4), Turbulence((1.0, 0.5, 1.0), 0.2, 0.35),
+                ColorOverLife((0.0, (0.05, 0.045, 0.04, 0.0)), (0.08, (0.07, 0.065, 0.06, 0.95)), (0.5, (0.2, 0.19, 0.18, 0.7)), (1.0, (0.38, 0.37, 0.36, 0.0))),
+                SizeOverLife((0.0, 0.5), (0.35, 1.4), (1.0, 2.4)),
+                Integrate]),
+            # A low ring of dust thrown out along the ground, which is what sells the blast's size.
+            Emitter("DustRing", Burst(28, BlendMode="Alpha", Texture=Smoke, SoftFadeDistance=1.0, bLit=True, CameraFadeDistance=3.0), [
+                Location("Disk", (1.5, 0.0, 0.0)), RadialVelocity(8.0, 14.0),
+                Size(1.2, 2.0), Life(1.2, 2.2), Spin(20.0),
+                Drag(3.5), Gravity(0.0, 0.4),
+                ColorOverLife((0.0, (0.32, 0.27, 0.2, 0.0)), (0.08, (0.35, 0.3, 0.22, 0.8)), (1.0, (0.45, 0.4, 0.33, 0.0))),
+                SizeOverLife((0.0, 0.4), (1.0, 2.2)),
                 Integrate]),
             Sparks(70, 12.0, 0.7, 1.6),
             Chunks(16, 14.0, 0.35),
@@ -256,6 +266,36 @@ def Effects(Assets):
                 Size(0.05, 0.14), Life(8.0, 12.0), Spin(600.0), Tint(0.36, 0.05, 0.05),
                 Gravity(0.0, -9.8), Collide(0.15, 0.8),
                 ("DampingOverLife", {"Damping": (0.4,)}),
+                Integrate]),
+            # A round in flight, stretched along its velocity and killed on the first surface it meets in view.
+            Emitter("Tracer", Pool(512, BlendMode="Additive", FacingMode="VelocityAligned", VelocityStretch=0.012, SoftFadeDistance=0.0, SortMode="None"), [
+                Size(0.05, 0.05), Life(0.4, 0.4),
+                Collide(0.0, 0.0, bKill=True, Thickness=0.5),
+                ColorOverLife((0.0, (16.0, 10.0, 4.0, 1.0)), (1.0, (9.0, 4.5, 1.2, 1.0))),
+                Integrate]),
+            Emitter("Muzzle", Pool(256, BlendMode="Additive", Texture=Flame, SoftFadeDistance=0.0, SortMode="None"), [
+                Size(0.5, 0.5), Life(0.05, 0.07), Spin(0.0),
+                ColorOverLife((0.0, (18.0, 11.0, 4.0, 1.0)), (1.0, (6.0, 2.5, 0.6, 0.0))),
+                SizeOverLife((0.0, 0.7), (1.0, 1.2)),
+                Integrate]),
+            Emitter("Flame", Pool(768, BlendMode="Additive", Texture=Flame, SoftFadeDistance=0.4, FacingMode="VerticalAxis"), [
+                Size(1.0, 1.0), Life(0.4, 0.7),
+                Gravity(0.0, 1.5), Turbulence((1.0, 0.3, 1.0), 0.8, 1.5),
+                ColorOverLife((0.0, (4.0, 2.4, 0.8, 0.0)), (0.12, (5.0, 2.4, 0.6, 1.0)), (0.5, (2.5, 0.7, 0.12, 0.7)), (1.0, (0.4, 0.06, 0.01, 0.0))),
+                SizeOverLife((0.0, 0.7), (0.4, 1.0), (1.0, 0.4)),
+                Integrate]),
+            # Script picks the tint, soot or dust, and the size the puff grows to; these two differ only in how long they linger.
+            Emitter("Smoke", Pool(1024, BlendMode="Alpha", Texture=Smoke, SoftFadeDistance=0.8, bLit=True), [
+                Size(1.0, 1.0), Life(1.4, 2.6), Spin(30.0),
+                Drag(0.6), Gravity(0.0, 0.4), Turbulence((0.6, 0.3, 0.6), 0.3, 0.4),
+                ("ColorOverLife", {"Gradient": Gradient((0.0, (1.0, 1.0, 1.0, 0.0)), (0.12, (1.0, 1.0, 1.0, 1.0)), (1.0, (1.15, 1.15, 1.15, 0.0))), "bScaleSpawnColor": True}),
+                SizeOverLife((0.0, 0.4), (1.0, 1.0)),
+                Integrate]),
+            Emitter("SmokeLong", Pool(768, BlendMode="Alpha", Texture=Smoke, SoftFadeDistance=1.0, bLit=True), [
+                Size(1.0, 1.0), Life(4.0, 7.0), Spin(20.0),
+                Drag(0.4), Gravity(0.0, 0.6), Turbulence((0.8, 0.3, 0.8), 0.2, 0.3),
+                ("ColorOverLife", {"Gradient": Gradient((0.0, (1.0, 1.0, 1.0, 0.0)), (0.08, (1.0, 1.0, 1.0, 1.0)), (1.0, (1.2, 1.2, 1.2, 0.0))), "bScaleSpawnColor": True}),
+                SizeOverLife((0.0, 0.35), (1.0, 1.0)),
                 Integrate]),
         ],
     }

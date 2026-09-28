@@ -6,15 +6,6 @@ using LuminaSharp;
 
 namespace Mercenaries;
 
-public enum EFxShape : byte
-{
-    Tracer,
-    Fireball,
-    Smoke,
-    SmokeLight,
-    Spark,
-}
-
 // Particle systems in /Game/Content/Effects, named P_ plus the member name.
 public enum EEffect : byte
 {
@@ -36,6 +27,11 @@ public enum EPoolEmitter
     BloodSpray,
     BloodMist,
     Gore,
+    Tracer,
+    Muzzle,
+    Flame,
+    Smoke,
+    SmokeLong,
 }
 
 // Cells of the T_Blood sheet, in the order Tools/GenerateTextures.py packs them.
@@ -47,23 +43,9 @@ public enum EBloodDecal
     Spray,
 }
 
-// Pooled throwaway visuals sharing one static mesh per shape, moved with a single bulk transform call per frame.
+// Throwaway visuals, fed as particles into the one effect pool entity, plus lights, decals and physical debris.
 public sealed class FxSystem
 {
-    private sealed class FPooled
-    {
-        public Entity Handle;
-        public bool bActive;
-        public float Age;
-        public float Life;
-        public FVector3 Position;
-        public FVector3 Velocity;
-        public FQuat Rotation = FQuat.Identity;
-        public FVector3 StartScale;
-        public FVector3 EndScale;
-        public float Drag;
-    }
-
     private sealed class FLight
     {
         public Entity Handle;
@@ -86,27 +68,38 @@ public sealed class FxSystem
     private const int MaxDebris = 90;
     private const string EffectFolder = "/Game/Content/Effects/";
     private const float ExplosionAuthoredRadius = 6.0f;
+
+    // A big blast lights its surroundings no harder than a medium one, or the scene around it bleaches white.
+    private const float MaxFlashIntensity = 2600.0f;
     private const float CollapseAuthoredWidth = 12.0f;
     private const float FireFadeLife = 10.0f;
     private const float CasingEjectRange = 40.0f;
     private const int PositionAndVelocity = (int)(EParticleEmitFlags.Position | EParticleEmitFlags.Velocity);
+    private const int PositionVelocitySize = (int)(EParticleEmitFlags.Position | EParticleEmitFlags.Velocity | EParticleEmitFlags.Size);
+    private const int AllEmitFields = (int)(EParticleEmitFlags.Position | EParticleEmitFlags.Velocity | EParticleEmitFlags.Color | EParticleEmitFlags.Size);
+    // Fast enough to read as a round in flight, slow enough that the streak is seen crossing the screen.
+    private const float TracerSpeed = 420.0f;
+    // The Tracer emitter's VelocityStretch in Tools/AuthorEffects.py, which draws the streak centered on the particle.
+    private const float TracerStretchSeconds = 0.012f;
+    // Puffs asked to linger at least this long go to the slow emitter, the rest to the quick one.
+    private const float LongSmokeLife = 3.5f;
     private const string DecalFolder = "/Game/Content/Decals/";
     private const int DecalSheetSide = 2;
     private const int MaxScorches = 40;
     private const int MaxBulletHoles = 120;
     private const float ScorchLife = 120.0f;
     private const float BulletHoleLife = 40.0f;
-    private const float EmberCoolTime = 7.0f;
+    // Embers are a brief, faint afterglow; held long or bright, the scorch's veins read as lava.
+    private const float EmberCoolTime = 2.5f;
+    private const float EmberPeakEnergy = 0.35f;
     private const int MaxBloodDecals = 320;
     private const float BloodDecalLife = 90.0f;
     private const int MaxBloodLandingsPerFrame = 8;
     private const float BloodLandingSpacing = 0.3f;
     private const float GoreSmearSpeed = 2.5f;
 
-    private readonly Dictionary<EFxShape, List<FPooled>> Pools = new();
     private readonly List<FLight> Lights = new();
     private readonly List<FDebris> DebrisPieces = new();
-    private readonly List<FPooled> Active = new();
     private readonly List<Entity> MovedEntities = new();
     private readonly List<FTransform> MovedTransforms = new();
     private readonly Dictionary<uint, CStaticMesh?> DebrisMeshes = new();
@@ -149,12 +142,6 @@ public sealed class FxSystem
             PoolEntity = Fx.Play(PoolSystem, FVector3.Zero, 0.0f);
         }
 
-        CreatePool(EFxShape.Tracer, 48);
-        CreatePool(EFxShape.Fireball, 96);
-        CreatePool(EFxShape.Smoke, 110);
-        CreatePool(EFxShape.SmokeLight, 120);
-        CreatePool(EFxShape.Spark, 32);
-
         for (int Index = 0; Index < MaxLights; ++Index)
         {
             Entity Handle = Mercs.World.CreateEntity($"FxLight_{Index}", Hidden);
@@ -165,92 +152,6 @@ public sealed class FxSystem
             Light.bCastShadows = false;
             Lights.Add(new FLight { Handle = Handle, Light = Light });
         }
-    }
-
-    private void CreatePool(EFxShape Shape, int Count)
-    {
-        MeshKit Kit = new();
-        bool bGlow = Shape is EFxShape.Tracer or EFxShape.Fireball or EFxShape.Spark;
-        switch (Shape)
-        {
-            case EFxShape.Tracer:
-                Kit.Box(FVector3.Zero, new FVector3(0.5f, 0.5f, 0.5f), Palette.Tracer);
-                break;
-            case EFxShape.Fireball:
-                Kit.Sphere(FVector3.Zero, 1.0f, Palette.Fire, 8);
-                Kit.Sphere(FVector3.Zero, 0.65f, Palette.FireCore, 6);
-                break;
-            case EFxShape.Smoke:
-                Kit.Sphere(FVector3.Zero, 1.0f, Palette.Smoke, 7);
-                break;
-            case EFxShape.SmokeLight:
-                Kit.Sphere(FVector3.Zero, 1.0f, Palette.SmokeLight, 7);
-                break;
-            case EFxShape.Spark:
-                Kit.Box(FVector3.Zero, new FVector3(0.5f), Palette.FireCore);
-                break;
-        }
-
-        CStaticMesh? Mesh = Kit.BuildStaticMesh(Mercs.World, bGlow);
-        List<FPooled> Pool = new(Count);
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            Entity Handle = Mercs.World.CreateEntity($"Fx_{Shape}_{Index}", Hidden, null, new FVector3(0.01f));
-            MeshKit.Show(Mercs.World.Registry, Handle, Mesh, false, false);
-            Pool.Add(new FPooled { Handle = Handle });
-        }
-
-        Pools[Shape] = Pool;
-    }
-
-    private FPooled? Acquire(EFxShape Shape)
-    {
-        if (!Pools.TryGetValue(Shape, out List<FPooled>? Pool))
-        {
-            return null;
-        }
-
-        FPooled? Oldest = null;
-        foreach (FPooled Item in Pool)
-        {
-            if (!Item.bActive)
-            {
-                return Item;
-            }
-
-            if (Oldest is null || Item.Age / Item.Life > Oldest.Age / Oldest.Life)
-            {
-                Oldest = Item;
-            }
-        }
-
-        if (Oldest is not null)
-        {
-            Active.Remove(Oldest);
-            Oldest.bActive = false;
-        }
-
-        return Oldest;
-    }
-
-    private void Launch(FPooled Item, FVector3 Position, FVector3 Velocity, FQuat Rotation, FVector3 StartScale, FVector3 EndScale, float Life, float Drag = 0.0f)
-    {
-        Item.bActive = true;
-        Item.Age = 0.0f;
-        Item.Life = MathF.Max(0.01f, Life);
-        Item.Position = Position;
-        Item.Velocity = Velocity;
-        Item.Rotation = Rotation;
-        Item.StartScale = StartScale;
-        Item.EndScale = EndScale;
-        Item.Drag = Drag;
-        Apply(Item, StartScale);
-        Active.Add(Item);
-    }
-
-    private void Apply(FPooled Item, FVector3 Scale)
-    {
-        Stage(Item.Handle, new FTransform(Item.Position, Item.Rotation, Scale));
     }
 
     // Queued rather than written, so a frame's worth of pooled movement crosses to native once in Flush.
@@ -287,71 +188,58 @@ public sealed class FxSystem
         return Mesh;
     }
 
-    public void Tracer(FVector3 From, FVector3 To, float Width = 0.05f, float Life = 0.06f)
+    // Flies out from From toward To and dies on the first surface it meets in view, so it ends where the round did.
+    public void Tracer(FVector3 From, FVector3 To, float Width = 0.05f)
     {
-        FVector3 Delta = To - From;
-        float Length = Delta.Length;
-        if (Length < 0.1f)
+        if (Pool is { } Emitters)
         {
-            return;
+            FVector3 Direction = (To - From).NormalizedOr(FVector3.Forward);
+            // Half a streak ahead, so its tail rather than its middle starts at the muzzle.
+            FVector3 Start = From + Direction * (TracerSpeed * TracerStretchSeconds * 0.5f);
+            Emitters.EmitParticle((int)EPoolEmitter.Tracer, Start, Direction * TracerSpeed, FVector4.One, Width, PositionVelocitySize);
         }
-
-        FPooled? Item = Acquire(EFxShape.Tracer);
-        if (Item is null)
-        {
-            return;
-        }
-
-        FQuat Rotation = FQuat.LookRotation(Delta / Length, MathF.Abs(Delta.Y / Length) > 0.95f ? FVector3.Right : FVector3.Up);
-        FVector3 Scale = new(Width, Width, Length);
-        Launch(Item, From + Delta * 0.5f, FVector3.Zero, Rotation, Scale, new FVector3(Width * 0.3f, Width * 0.3f, Length), Life);
     }
 
     public void Muzzle(FVector3 Position, float Size = 0.25f)
     {
-        FPooled? Item = Acquire(EFxShape.Fireball);
-        if (Item is not null)
+        if (Pool is { } Emitters)
         {
-            Launch(Item, Position, FVector3.Zero, FQuat.Identity, new FVector3(Size), new FVector3(Size * 0.3f), 0.05f);
+            Emitters.EmitParticle((int)EPoolEmitter.Muzzle, Position, FVector3.Zero, FVector4.One, Size * 2.4f, PositionVelocitySize);
         }
     }
 
     public void Spark(FVector3 Position, FVector3 Normal, int Count = 3)
     {
-        for (int Index = 0; Index < Count; ++Index)
-        {
-            FPooled? Item = Acquire(EFxShape.Spark);
-            if (Item is null)
-            {
-                return;
-            }
-
-            FVector3 Velocity = (Normal + new FVector3(Mercs.Range(-0.7f, 0.7f), Mercs.Range(-0.2f, 0.8f), Mercs.Range(-0.7f, 0.7f))).NormalizedOr(FVector3.Up) * Mercs.Range(3.0f, 7.0f);
-            Launch(Item, Position, Velocity, FQuat.Identity, new FVector3(0.06f), new FVector3(0.01f), Mercs.Range(0.15f, 0.3f), 2.0f);
-        }
-    }
-
-    public void Puff(FVector3 Position, float Size, float Life, bool bDark, FVector3 Velocity)
-    {
-        FPooled? Item = Acquire(bDark ? EFxShape.Smoke : EFxShape.SmokeLight);
-        if (Item is null)
+        if (Pool is not { } Emitters)
         {
             return;
         }
 
-        Launch(Item, Position, Velocity, FQuat.Identity, new FVector3(Size * 0.4f), new FVector3(Size), Life, 0.6f);
+        for (int Index = 0; Index < Count * 2; ++Index)
+        {
+            FVector3 Velocity = (Normal + new FVector3(Mercs.Range(-0.7f, 0.7f), Mercs.Range(-0.2f, 0.8f), Mercs.Range(-0.7f, 0.7f))).NormalizedOr(FVector3.Up) * Mercs.Range(3.0f, 9.0f);
+            Emit(Emitters, EPoolEmitter.Sparks, Position, Velocity);
+        }
+    }
+
+    // Size is how wide the puff grows to; a long Life picks the slow emitter, and bDark picks soot over dust.
+    public void Puff(FVector3 Position, float Size, float Life, bool bDark, FVector3 Velocity)
+    {
+        if (Pool is { } Emitters)
+        {
+            EPoolEmitter Emitter = Life >= LongSmokeLife ? EPoolEmitter.SmokeLong : EPoolEmitter.Smoke;
+            FVector4 Tint = Palette.ToLinear(bDark ? Palette.Smoke : Palette.SmokeLight);
+            Emitters.EmitParticle((int)Emitter, Position, Velocity, new FVector4(Tint.X, Tint.Y, Tint.Z, bDark ? 0.9f : 0.7f), Size, AllEmitFields);
+        }
     }
 
     public void Flame(FVector3 Position, float Size)
     {
-        FPooled? Item = Acquire(EFxShape.Fireball);
-        if (Item is null)
+        if (Pool is { } Emitters)
         {
-            return;
+            FVector3 Velocity = new(Mercs.Range(-0.3f, 0.3f), Mercs.Range(1.5f, 3.0f), Mercs.Range(-0.3f, 0.3f));
+            Emitters.EmitParticle((int)EPoolEmitter.Flame, Position, Velocity, FVector4.One, Size * 1.6f, PositionVelocitySize);
         }
-
-        FVector3 Velocity = new(Mercs.Range(-0.3f, 0.3f), Mercs.Range(1.5f, 3.0f), Mercs.Range(-0.3f, 0.3f));
-        Launch(Item, Position, Velocity, FQuat.Identity, new FVector3(Size), new FVector3(Size * 0.2f), Mercs.Range(0.3f, 0.5f));
     }
 
     public bool HasEffect(EEffect Id) => Effects[(int)Id] is not null;
@@ -486,7 +374,7 @@ public sealed class FxSystem
             }
 
             float Heat = 1.0f - Age / EmberCoolTime;
-            Component.EmissionEnergy = Heat * Heat;
+            Component.EmissionEnergy = EmberPeakEnergy * Heat * Heat * Heat;
             CoolingScorches[Index] = (Decal, Age);
         }
     }
@@ -651,22 +539,15 @@ public sealed class FxSystem
         if (Effects[(int)EEffect.Explosion] is { } System)
         {
             Fx.Play(System, EffectTransform(Position, Math.Clamp(Radius / ExplosionAuthoredRadius, 0.35f, 3.5f)));
-            Flash(Position + new FVector3(0.0f, 1.5f, 0.0f), 400.0f * Radius, 0.35f + Radius * 0.02f);
+            Flash(Position + new FVector3(0.0f, 1.5f, 0.0f), MathF.Min(400.0f * Radius, MaxFlashIntensity), 0.35f + Radius * 0.02f);
             return;
         }
 
         int Balls = Math.Clamp((int)(Radius * 0.8f), 2, 7);
         for (int Index = 0; Index < Balls; ++Index)
         {
-            FPooled? Item = Acquire(EFxShape.Fireball);
-            if (Item is null)
-            {
-                break;
-            }
-
             FVector3 Offset = new(Mercs.Range(-0.4f, 0.4f) * Radius, Mercs.Range(0.0f, 0.5f) * Radius, Mercs.Range(-0.4f, 0.4f) * Radius);
-            float Size = Radius * Mercs.Range(0.35f, 0.6f);
-            Launch(Item, Position + Offset, Offset * 0.8f + new FVector3(0.0f, 2.0f, 0.0f), FQuat.Identity, new FVector3(Size * 0.4f), new FVector3(Size * 1.2f), Mercs.Range(0.35f, 0.6f), 1.5f);
+            Flame(Position + Offset, Radius * Mercs.Range(0.35f, 0.6f));
         }
 
         int Puffs = Math.Clamp((int)(Radius * 1.2f), 3, 10);
@@ -749,29 +630,23 @@ public sealed class FxSystem
         }
     }
 
+    private void Crumble(FVector3 At, FVector3 Scale)
+    {
+        float Size = MathF.Max(Scale.X, MathF.Max(Scale.Y, Scale.Z));
+        Puff(At, Size * 1.6f, 1.5f, false, new FVector3(0.0f, 0.4f, 0.0f));
+        if (Pool is { } Emitters)
+        {
+            for (int Index = 0; Index < 4; ++Index)
+            {
+                Emit(Emitters, EPoolEmitter.Clods, At + FVector3.Up * 0.1f, Scatter(FVector3.Up, 0.8f) * Mercs.Range(1.0f, 2.5f));
+            }
+        }
+    }
+
     public void Update(float DeltaTime)
     {
         CoolScorches(DeltaTime);
         StainWhereBloodLanded();
-
-        for (int Index = Active.Count - 1; Index >= 0; --Index)
-        {
-            FPooled Item = Active[Index];
-            Item.Age += DeltaTime;
-            if (Item.Age >= Item.Life)
-            {
-                Item.bActive = false;
-                Item.Position = Hidden;
-                Apply(Item, new FVector3(0.01f));
-                Active.RemoveAt(Index);
-                continue;
-            }
-
-            float T = Item.Age / Item.Life;
-            Item.Velocity *= MathF.Max(0.0f, 1.0f - Item.Drag * DeltaTime);
-            Item.Position += Item.Velocity * DeltaTime;
-            Apply(Item, FVector3.Lerp(Item.StartScale, Item.EndScale, T));
-        }
 
         foreach (FLight Item in Lights)
         {
@@ -800,16 +675,13 @@ public sealed class FxSystem
             Item.Life -= DeltaTime;
             if (Item.Life > 0.0f)
             {
-                if (Item.Life < 0.8f)
-                {
-                    Mercs.World.Registry.TryGet<STransformComponent>(Item.Handle)?.SetLocalScale(Item.Scale * MathF.Max(Item.Life / 0.8f, 0.01f));
-                }
-
                 continue;
             }
 
+            // Crumbles into dust and grit where it lies, rather than shrinking out of existence.
             if (Mercs.World.IsValidEntity(Item.Handle))
             {
+                Crumble(Mercs.World.GetEntityLocation(Item.Handle), Item.Scale);
                 Mercs.World.DestroyEntity(Item.Handle);
             }
 

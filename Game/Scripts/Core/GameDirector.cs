@@ -26,6 +26,7 @@ public sealed class GameDirector : EntityScript
     public bool bGodMode;
     private bool bBuilt;
     private float SiteTimer;
+    private int CheatPlant = -1;
 
     public override void OnReady()
     {
@@ -35,6 +36,7 @@ public sealed class GameDirector : EntityScript
         Terrain.Reset();
         HumanoidBody.Reset();
         Sfx.Reset();
+        Music.Reset();
         Mercs.Wallet.Cash = StartingCash;
 
         DateTime Started = DateTime.Now;
@@ -77,6 +79,8 @@ public sealed class GameDirector : EntityScript
         if (Mercs.Director == this)
         {
             Sfx.Shutdown();
+            Music.Shutdown();
+            Mercs.Trailer.Shutdown();
             Mercs.Destruction.Shutdown();
             Mercs.Shutdown();
         }
@@ -95,7 +99,12 @@ public sealed class GameDirector : EntityScript
         float Step = MathF.Min(DeltaTime, 0.1f);
         Mercs.Time += Step;
 
-        Mercs.Clock.Update(Step);
+        Mercs.Trailer.Update(DeltaTime);
+        Mercs.AiStats.Update(DeltaTime);
+        if (!Mercs.Trailer.IsClockFrozen)
+        {
+            Mercs.Clock.Update(Step);
+        }
         Mercs.Factions.Update(Step);
         Mercs.Feed.Update(Step);
         Mercs.Fx.Update(Step);
@@ -106,6 +115,7 @@ public sealed class GameDirector : EntityScript
         Mercs.Contracts.Update(Step);
         Mercs.Destruction.Update(Step);
         Sfx.Update();
+        Music.Update();
         Mercs.Fx.Flush();
 
         if (bDevCheats)
@@ -147,7 +157,20 @@ public sealed class GameDirector : EntityScript
             PendingRide = bShift ? Jeep : null;
         }
 
-        if (Controls.KeyPressed(EKey.D6))
+        // Shift steps through the plant kinds instead, to look at the foliage up close.
+        if (Controls.KeyPressed(EKey.D6) && bShift)
+        {
+            CheatPlant++;
+            EFoliageKind Kind = (EFoliageKind)(CheatPlant % ((int)EFoliageKind.Bush + 1));
+            if (Mercs.Destruction.PlantOf(Kind, CheatPlant / ((int)EFoliageKind.Bush + 1)) is { } Plant)
+            {
+                FVector3 Arrival = Geo.Ground(Plant + new FVector3(0.0f, 0.0f, -9.0f)) + new FVector3(0.0f, 1.5f, 0.0f);
+                Player.Teleport(Arrival);
+                MercCamera.Instance?.SnapBehind(Geo.YawOf(Plant - Arrival));
+                Mercs.Feed.Post($"Teleported to a {Kind}", ENewsTone.Neutral);
+            }
+        }
+        else if (Controls.KeyPressed(EKey.D6))
         {
             CheatSite = (CheatSite + 1) % Mercs.Sites.Count;
             Site Place = Mercs.Sites[CheatSite];

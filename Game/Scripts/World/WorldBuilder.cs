@@ -182,7 +182,7 @@ public sealed class WorldBuilder
 
         SCloudComponent Clouds = Registry.GetOrAdd<SCloudComponent>(Sky)!;
         Clouds.bEnabled = true;
-        Clouds.Coverage = 0.35f;
+        Clouds.Coverage = 0.4f;
 
         SExponentialHeightFogComponent Fog = Registry.GetOrAdd<SExponentialHeightFogComponent>(Sky)!;
         Fog.bEnabled = true;
@@ -616,7 +616,7 @@ public sealed class WorldBuilder
     private void ScatterDecor()
     {
         Random Rng = new(4242);
-        for (int Attempt = 0; Attempt < 2600; ++Attempt)
+        for (int Attempt = 0; Attempt < 32000; ++Attempt)
         {
             float X = ((float)Rng.NextDouble() - 0.5f) * Terrain.HalfSize * 1.8f;
             float Z = ((float)Rng.NextDouble() - 0.5f) * Terrain.HalfSize * 1.8f;
@@ -632,31 +632,36 @@ public sealed class WorldBuilder
                 continue;
             }
 
+            // Groves and open meadows rather than an even sprinkle, thickening into jungle to the north.
             float Jungle = Mathf.SmoothStep(60.0f, 220.0f, Z);
-            double Roll = Rng.NextDouble();
+            float Grove = Mathf.SmoothStep(0.5f, 0.72f, Noise.Fbm(X * 0.0055f + 3.0f, Z * 0.0055f - 11.0f));
+            float Density = Mathf.Clamp01(Grove * 0.85f + Jungle * 0.6f + 0.06f);
             float Scale = 0.7f + (float)Rng.NextDouble() * 0.7f;
+            float Yaw = (float)Rng.NextDouble() * 360.0f;
+            double Roll = Rng.NextDouble();
+
             if (Height < 3.5f)
             {
-                if (Roll < 0.5)
+                if (Roll < 0.16)
                 {
-                    Mercs.Destruction.AddFoliage(EFoliageKind.Palm, At, Scale, (float)Rng.NextDouble() * 360.0f);
+                    Mercs.Destruction.AddFoliage(EFoliageKind.Palm, At, Scale, Yaw);
                 }
             }
-            else if (Roll < 0.35 + Jungle * 0.45)
+            else if (Roll < Density * 0.5f)
             {
-                Mercs.Destruction.AddFoliage(Jungle > 0.5f ? EFoliageKind.JungleTree : EFoliageKind.Tree, At, Scale, 0.0f);
+                Mercs.Destruction.AddFoliage(Jungle > 0.5f ? EFoliageKind.JungleTree : EFoliageKind.Tree, At, Scale, Yaw);
             }
-            else if (Roll < 0.5 + Jungle * 0.3)
+            else if (Roll < Density * 0.9f)
             {
-                Mercs.Destruction.AddFoliage(EFoliageKind.Palm, At, Scale, (float)Rng.NextDouble() * 360.0f);
+                Mercs.Destruction.AddFoliage(EFoliageKind.Bush, At, Scale, Yaw);
             }
-            else if (Roll < 0.62)
+            else if (Roll < Density * 0.9f + 0.012f * (1.0f - Jungle))
+            {
+                Mercs.Destruction.AddFoliage(EFoliageKind.Palm, At, Scale, Yaw);
+            }
+            else if (Roll > 0.985)
             {
                 AddDecor(At, (Kit, Local) => Kit.Box(Local + new FVector3(0.0f, 0.4f * Scale, 0.0f), new FVector3(1.2f, 0.8f, 1.0f) * Scale, Palette.Shade(Palette.Rock, 0.8f + Scale * 0.2f), FQuat.FromEuler(0.2f, Scale * 3.0f, 0.1f)));
-            }
-            else if (Roll < 0.72)
-            {
-                Mercs.Destruction.AddFoliage(EFoliageKind.Bush, At, Scale, 0.0f);
             }
         }
     }

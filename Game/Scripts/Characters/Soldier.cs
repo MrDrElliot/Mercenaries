@@ -62,8 +62,11 @@ public sealed class Soldier : EntityScript, IDamageable
     private float StateTime;
     private float BurstLeft;
     private float BurstPause;
-    private float StrafeSign = 1.0f;
     private float StrafeTimer;
+    private FVector3 CombatSpot;
+    private bool bHasCombatSpot;
+    private FVector3 EscapeSpot;
+    private float EscapeRetarget;
     private float GrenadeCooldown = 6.0f;
     private float DetourYaw;
     private float DetourTime;
@@ -106,12 +109,16 @@ public sealed class Soldier : EntityScript, IDamageable
     private FVector3 AbandonedGoal = new(float.MaxValue, 0.0f, 0.0f);
     private bool bFollowing;
     private bool bMovedThisFrame;
+
+    // Below this a soldier that is trying to move counts as snagged on something.
+    private const float StalledSpeed = 0.3f;
     private int FramesAlive;
     private FVector3 CachedPosition;
 
-    public Entity Owner => Entity;
+    // Shells and hits outlive whoever fired them, so a destroyed script answers with no entity rather than throwing.
+    public Entity Owner => IsValid ? Entity : Entity.Null;
     public EFaction Faction => Team;
-    public bool IsAlive => !bDead && !bSubdued;
+    public bool IsAlive => IsValid && !bDead && !bSubdued;
     public bool IsPlayerControlled => false;
     public FVector3 Position => CachedPosition;
     public float Radius => 0.5f;
@@ -119,6 +126,7 @@ public sealed class Soldier : EntityScript, IDamageable
     public bool IsSubdued => bSubdued;
     public ESoldierState CurrentState => State;
     public bool IsInCombat => State == ESoldierState.Combat;
+    public bool IsFighting(IDamageable Who) => State == ESoldierState.Combat && Target == Who;
     public float HealthFraction => Health?.GetHealthFraction() ?? 0.0f;
     public EWeapon WeaponKind => Weapon.Kind;
     public IDamageable? CurrentTarget => Target;
@@ -265,6 +273,10 @@ public sealed class Soldier : EntityScript, IDamageable
         if (!bMovedThisFrame)
         {
             StopFollowing();
+        }
+        else if (Movement is not null && Geo.Flat(Movement.Velocity).Length < StalledSpeed)
+        {
+            Mercs.AiStats.AddStall(State, bFollowing, DeltaTime);
         }
         bMovedThisFrame = false;
 
@@ -504,7 +516,7 @@ public sealed class Soldier : EntityScript, IDamageable
         if (WanderWait <= 0.0f)
         {
             WanderWait = Mercs.Range(4.0f, 10.0f);
-            WanderGoal = Geo.RandomAround(Home, 0.0f, HomeRadius * 0.6f);
+            WanderGoal = ReachablePointNear(Home, HomeRadius * 0.6f);
         }
         else
         {
@@ -579,28 +591,18 @@ public sealed class Soldier : EntityScript, IDamageable
             return;
         }
 
-        float Preferred = PreferredRange;
         StrafeTimer -= DeltaTime;
-        if (StrafeTimer <= 0.0f)
+        if (StrafeTimer <= 0.0f || (bHasCombatSpot && Geo.FlatDistance(CachedPosition, CombatSpot) < 1.0f))
         {
             StrafeTimer = Mercs.Range(1.5f, 3.5f);
-            StrafeSign = Mercs.Chance(0.5f) ? 1.0f : -1.0f;
+            bHasCombatSpot = PickCombatSpot(Aim, Distance, out CombatSpot);
         }
 
-        float Forward = Distance > Preferred + 6.0f ? 1.0f : (Distance < Preferred - 8.0f ? -0.7f : 0.0f);
-        float Strafe = Role == ESoldierRole.Sniper ? 0.0f : StrafeSign * 0.6f;
-        FVector3 Local = new(Strafe, 0.0f, Forward);
-        if (Local.LengthSquared > 0.01f)
+        // Keeps its gun on the target while it walks, since the path only decides where the feet go.
+        if (bHasCombatSpot)
         {
-            FVector3 WorldMove = Geo.Heading(CurrentYaw) * Forward + Geo.RightOf(CurrentYaw) * Strafe;
-            if (!IsBlocked(WorldMove.NormalizedOr(FVector3.Forward)))
-            {
-                Controller?.AddMovementInput(Local);
-            }
-            else
-            {
-                StrafeSign = -StrafeSign;
-            }
+            float Throttle = Distance > PreferredRange + 6.0f ? 0.9f : 0.6f;
+            MoveToward(CombatSpot, Throttle, DeltaTime, false);
         }
 
         float Facing = MathF.Abs(Mathf.DeltaAngleDegrees(CurrentYaw, DesiredYaw));
@@ -679,8 +681,7 @@ public sealed class Soldier : EntityScript, IDamageable
 
     private void TickFlee(float DeltaTime)
     {
-        FVector3 Away = Geo.Flat(CachedPosition - FleeFrom).NormalizedOr(Geo.Heading(CurrentYaw));
-        MoveToward(CachedPosition + Away * 10.0f, 1.0f, DeltaTime);
+        RunFrom(FleeFrom, 14.0f, DeltaTime);
         if (StateTime > (bIsHvt ? 12.0f : 8.0f))
         {
             SetState(Role == ESoldierRole.Civilian ? ESoldierState.Patrol : ESoldierState.Alert);
@@ -717,12 +718,93 @@ public sealed class Soldier : EntityScript, IDamageable
     {
         if (StateTime < 3.0f)
         {
-            FVector3 Away = Geo.Flat(CachedPosition - FleeFrom).NormalizedOr(Geo.Heading(CurrentYaw));
-            MoveToward(CachedPosition + Away * 8.0f, 1.0f, DeltaTime);
+            RunFrom(FleeFrom, 10.0f, DeltaTime);
             return;
         }
 
         TurnToward(Geo.YawOf(FleeFrom - CachedPosition) + 180.0f, 90.0f, DeltaTime);
+    }
+
+    // Headings tried when running from a threat, straight away first, so a wall behind the soldier turns it along the wall.
+    private static readonly float[] EscapeFan = { 0.0f, 35.0f, -35.0f, 70.0f, -70.0f, 110.0f, -110.0f };
+
+    private void RunFrom(FVector3 Threat, float Distance, float DeltaTime)
+    {
+        EscapeRetarget -= DeltaTime;
+        if (EscapeRetarget <= 0.0f || Geo.FlatDistance(CachedPosition, EscapeSpot) < 1.5f)
+        {
+            EscapeRetarget = 2.0f;
+            EscapeSpot = PickEscapeSpot(Threat, Distance);
+        }
+        MoveToward(EscapeSpot, 1.0f, DeltaTime);
+    }
+
+    // The heading whose clear run on the navmesh is longest, favoring those that lead straight away from the threat.
+    private FVector3 PickEscapeSpot(FVector3 Threat, float Distance)
+    {
+        float AwayYaw = Geo.YawOf(Geo.Flat(CachedPosition - Threat).NormalizedOr(Geo.Heading(CurrentYaw)));
+        if (!Mercs.bInfantryNavReady)
+        {
+            return CachedPosition + Geo.Heading(AwayYaw) * Distance;
+        }
+
+        FVector3 Best = CachedPosition;
+        float BestScore = -1.0f;
+        foreach (float Angle in EscapeFan)
+        {
+            FVector3 End = CachedPosition + Geo.Heading(AwayYaw + Angle) * Distance;
+            FNavRaycastResult Run = CNavigationLibrary.Raycast(World, CachedPosition, End);
+            float Score = Run.T * (1.0f - MathF.Abs(Angle) / 360.0f);
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                Best = Run.Point;
+            }
+        }
+        return Best;
+    }
+
+    // A spot on the navmesh at the preferred range, stepped sideways so a firefight keeps moving, reached without blundering into cover.
+    private bool PickCombatSpot(FVector3 TargetPosition, float Distance, out FVector3 Spot)
+    {
+        Spot = CachedPosition;
+        if (!Mercs.bInfantryNavReady)
+        {
+            return false;
+        }
+
+        float Preferred = PreferredRange;
+        bool bAdvancing = Distance > Preferred + 6.0f;
+        float Range = bAdvancing ? Preferred + 2.0f : (Distance < Preferred - 8.0f ? Preferred - 4.0f : Distance);
+        float Side = Role == ESoldierRole.Sniper ? 0.0f : Mercs.Range(3.0f, 6.0f) * (Mercs.Chance(0.5f) ? 1.0f : -1.0f);
+
+        FVector3 FromTarget = Geo.Flat(CachedPosition - TargetPosition).NormalizedOr(-Geo.Heading(CurrentYaw));
+        FVector3 Across = new(FromTarget.Z, 0.0f, -FromTarget.X);
+        foreach (float Sign in new[] { 1.0f, -1.0f })
+        {
+            FVector3 Candidate = TargetPosition + FromTarget * Range + Across * (Side * Sign);
+            FNavPoint OnMesh = CNavigationLibrary.ProjectPoint(World, Candidate, new FVector3(2.0f, 4.0f, 2.0f));
+            // Closing in may route around cover, but a sidestep that needs a detour is not a sidestep.
+            if (OnMesh.bFound && (bAdvancing || CNavigationLibrary.IsWalkableLine(World, CachedPosition, OnMesh.Point)))
+            {
+                Spot = OnMesh.Point;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private FVector3 ReachablePointNear(FVector3 Center, float Radius)
+    {
+        if (Mercs.bInfantryNavReady)
+        {
+            FNavPoint Point = CNavigationLibrary.FindRandomReachablePoint(World, Center, Radius);
+            if (Point.bFound)
+            {
+                return Point.Point;
+            }
+        }
+        return Geo.RandomAround(Center, 0.0f, Radius);
     }
 
     private void TurnToward(float Yaw, float DegreesPerSecond, float DeltaTime)
@@ -747,7 +829,7 @@ public sealed class Soldier : EntityScript, IDamageable
     }
 
     // False once the soldier has got as close as the navmesh allows, or given up on a goal it kept getting stuck short of.
-    private bool MoveToward(FVector3 Goal, float Throttle, float DeltaTime)
+    private bool MoveToward(FVector3 Goal, float Throttle, float DeltaTime, bool bFaceMovement = true)
     {
         if (Geo.Flat(Goal - CachedPosition).LengthSquared < 0.25f || Geo.FlatDistance(Goal, AbandonedGoal) < 1.5f)
         {
@@ -782,7 +864,7 @@ public sealed class Soldier : EntityScript, IDamageable
             {
                 bMovedThisFrame = true;
                 FVector3 Ahead = Geo.Flat(Path.GetNextCorner() - CachedPosition);
-                if (Ahead.LengthSquared > 0.01f)
+                if (bFaceMovement && Ahead.LengthSquared > 0.01f)
                 {
                     TurnToward(Geo.YawOf(Ahead), 360.0f, DeltaTime);
                 }

@@ -180,10 +180,7 @@ public static class Weapons
 
             if (bTracers && (Pellet == 0 || Pellet % 3 == 0))
             {
-                float Travel = FVector3.Distance(Muzzle, Impact);
-                float Streak = MathF.Min(7.0f, Travel);
-                float Start = Mercs.Range(0.6f, MathF.Max(0.6f, Travel - Streak));
-                Mercs.Fx.Tracer(Muzzle + Aim * Start, Muzzle + Aim * (Start + Streak), Shooter.IsPlayerControlled ? 0.05f : 0.04f);
+                Mercs.Fx.Tracer(Muzzle + Aim * 0.8f, Impact, Shooter.IsPlayerControlled ? 0.05f : 0.04f);
             }
 
             if (!Shooter.IsPlayerControlled && Pellet == 0)

@@ -67,6 +67,24 @@ public sealed class MercsHud : EntityScript
         Binding?.Dispose();
     }
 
+    // Hidden while a cinematic plays, so a trailer shows the world rather than the interface.
+    public void SetVisible(bool bVisible)
+    {
+        if (!Screen.IsValid)
+        {
+            return;
+        }
+
+        if (bVisible)
+        {
+            Screen.Show(false, false);
+        }
+        else
+        {
+            Screen.Hide();
+        }
+    }
+
     public void OnPlayerDamaged(float Amount)
     {
         DamageFlash = MathF.Min(1.0f, DamageFlash + Amount / 60.0f);

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Lumina;
 using LuminaSharp;
 
@@ -89,6 +90,7 @@ public static class Mercs
     public static ThrowableSystem Throwables = new();
     public static DestructionSystem Destruction = new();
     public static DayNight Clock = new();
+    public static Trailer Trailer = new();
 
     public static readonly List<Soldier> Soldiers = new();
     public static readonly List<Vehicle> Vehicles = new();
@@ -102,6 +104,7 @@ public static class Mercs
     // The vehicle navmesh is baked wider than the infantry one, and queries name it to get paths a truck fits through.
     public const string VehicleNavAgent = "Vehicle";
     public static bool bInfantryNavReady;
+    public static readonly AiStatistics AiStats = new();
     public static bool bVehicleNavReady;
 
     public static void Reset(CWorld NewWorld, GameDirector NewDirector)
@@ -120,6 +123,7 @@ public static class Mercs
         Ordnance = new OrdnanceSystem();
         Throwables = new ThrowableSystem();
         Destruction = new DestructionSystem();
+        Trailer = new Trailer();
         Soldiers.Clear();
         Vehicles.Clear();
         Structures.Clear();
@@ -188,4 +192,36 @@ public static class Mercs
     public static T Pick<T>(IReadOnlyList<T> Items) => Items[Rng.Next(Items.Count)];
 
     public static FVector3 PlayerPosition => Player is not null ? Player.Position : FVector3.Zero;
+}
+
+// Time soldiers spend trying to move without getting anywhere, reported to the log so navigation changes can be measured.
+public sealed class AiStatistics
+{
+    private const float ReportInterval = 15.0f;
+
+    public float StalledSeconds;
+    private float SinceReport;
+    private readonly Dictionary<string, float> ByCause = new();
+
+    public void AddStall(ESoldierState State, bool bOnPath, float DeltaTime)
+    {
+        StalledSeconds += DeltaTime;
+        string Cause = $"{State}/{(bOnPath ? "path" : "direct")}";
+        ByCause[Cause] = ByCause.GetValueOrDefault(Cause) + DeltaTime;
+    }
+
+    public void Update(float DeltaTime)
+    {
+        SinceReport += DeltaTime;
+        if (SinceReport < ReportInterval)
+        {
+            return;
+        }
+
+        string Causes = string.Join(", ", ByCause.Select(Pair => $"{Pair.Key} {Pair.Value:0.0}"));
+        LuminaSharp.Debug.Log($"[AI] {Mercs.Soldiers.Count} soldiers stalled for {StalledSeconds:0.0} soldier-seconds over {SinceReport:0}s ({Causes})");
+        StalledSeconds = 0.0f;
+        ByCause.Clear();
+        SinceReport = 0.0f;
+    }
 }

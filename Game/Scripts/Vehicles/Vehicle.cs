@@ -105,9 +105,10 @@ public sealed class Vehicle : EntityScript, IDamageable
     private float BlockedTime;
     private float AiBurst;
 
-    public Entity Owner => Entity;
+    // Shells and hits outlive whoever fired them, so a destroyed script answers with no entity rather than throwing.
+    public Entity Owner => IsValid ? Entity : Entity.Null;
     public EFaction Faction => Team;
-    public bool IsAlive => !bDestroyed && bReady;
+    public bool IsAlive => IsValid && !bDestroyed && bReady;
     public bool IsPlayerControlled => Rider is not null;
     public FVector3 Position => Pos + new FVector3(0.0f, Def.HalfExtents.Y + Def.Clearance, 0.0f);
     public float Radius => MathF.Max(Def.HalfExtents.X, Def.HalfExtents.Z) * 0.75f;
@@ -335,6 +336,30 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
     }
 
+    private Entity CrewSeat = Entity.Null;
+
+    // An AI crew in an open cab is drawn at the wheel, and taken away once they bail out, the vehicle dies or the player climbs in.
+    private void UpdateCrewFigure()
+    {
+        bool bWant = IsCrewed && Def.DriverSeat is not null;
+        if (bWant == !CrewSeat.IsNull)
+        {
+            return;
+        }
+
+        if (!bWant)
+        {
+            World.DestroyEntity(CrewSeat);
+            CrewSeat = Entity.Null;
+            return;
+        }
+
+        CrewSeat = World.CreateEntity("Driver", FVector3.Zero);
+        World.SetParent(CrewSeat, Entity);
+        Registry.Get<STransformComponent>(CrewSeat).SetLocalTransform(new FTransform(Def.DriverSeat!.Value, FQuat.Identity, FVector3.One));
+        HumanoidBody.PoseSeated(Registry, HumanoidBody.BuildRig(World, CrewSeat, Team, EWeapon.Rifle, false));
+    }
+
     // Lit only after dark with someone at the wheel, which also makes an occupied vehicle visible from afar at night.
     private void UpdateHeadlights()
     {
@@ -454,6 +479,8 @@ public sealed class Vehicle : EntityScript, IDamageable
         {
             return;
         }
+
+        UpdateCrewFigure();
 
         if (bDestroyed)
         {

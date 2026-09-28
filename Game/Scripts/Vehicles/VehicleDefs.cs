@@ -42,6 +42,9 @@ public sealed class VehicleDef
     public float CameraHeight = 3.0f;
     public float CrushSpeed = 4.0f;
     public bool bSkidSteer;
+
+    // Where the driver's hips sit in an open cab, so whoever drives is seen at the wheel; null keeps an enclosed cab's crew out of sight.
+    public FVector3? DriverSeat;
     public readonly List<FWheelSpec> Wheels = new();
 
     // Four wheels at the corners, front pair steering.
@@ -70,9 +73,9 @@ public static class VehicleDefs
 
     static VehicleDefs()
     {
-        Add(new VehicleDef { Type = EVehicleType.Jeep, Name = "Jeep", MaxHealth = 450, MaxSpeed = 30, Acceleration = 14, TurnRate = 95, HalfExtents = new FVector3(0.95f, 0.7f, 2.1f), Crew = 1, CameraDistance = 8.5f }
+        Add(new VehicleDef { Type = EVehicleType.Jeep, Name = "Jeep", MaxHealth = 450, MaxSpeed = 30, Acceleration = 14, TurnRate = 95, HalfExtents = new FVector3(0.95f, 0.7f, 2.1f), Crew = 1, CameraDistance = 8.5f, DriverSeat = new FVector3(-0.4f, 1.45f, -0.16f) }
             .Axles(0.85f, 1.35f, -1.35f, 0.42f, 0.3f));
-        Add(new VehicleDef { Type = EVehicleType.Technical, Name = "Technical", MaxHealth = 500, MaxSpeed = 27, Acceleration = 12, TurnRate = 85, HalfExtents = new FVector3(1.0f, 0.75f, 2.4f), Primary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.1f, -1.2f), MuzzleLength = 1.1f, Crew = 2, CameraDistance = 9.0f }
+        Add(new VehicleDef { Type = EVehicleType.Technical, Name = "Technical", MaxHealth = 500, MaxSpeed = 27, Acceleration = 12, TurnRate = 85, HalfExtents = new FVector3(1.0f, 0.75f, 2.4f), Primary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.1f, -1.2f), MuzzleLength = 1.1f, Crew = 2, CameraDistance = 9.0f, DriverSeat = new FVector3(-0.4f, 1.45f, -0.06f) }
             .Axles(0.85f, 1.35f, -1.35f, 0.42f, 0.3f));
         Add(new VehicleDef { Type = EVehicleType.Truck, Name = "Cargo Truck", MaxHealth = 800, MaxSpeed = 22, Acceleration = 8, TurnRate = 60, HalfExtents = new FVector3(1.25f, 1.3f, 3.6f), Clearance = 0.5f, Crew = 3, CameraDistance = 11.0f, CameraHeight = 4.0f }
             .Axles(1.05f, 2.4f, -2.6f, 0.55f, 0.4f, -1.2f));
@@ -100,9 +103,7 @@ public static class VehicleDefs
     public static MeshKit BuildWheel(float Radius, float Width)
     {
         MeshKit Wheel = new();
-        Wheel.Tube(new FVector3(-Width * 0.5f, 0.0f, 0.0f), new FVector3(Width * 0.5f, 0.0f, 0.0f), Radius, Radius, Palette.Rubber, 10);
-        Wheel.Box(new FVector3(Width * 0.5f + 0.01f, 0.0f, 0.0f), new FVector3(0.01f, Radius * 0.45f, Radius * 0.45f), Palette.Steel);
-        Wheel.Box(new FVector3(-Width * 0.5f - 0.01f, 0.0f, 0.0f), new FVector3(0.01f, Radius * 0.45f, Radius * 0.45f), Palette.Steel);
+        VehicleShapes.Wheel(Wheel, FVector3.Zero, FVector3.Right, Radius, Width);
         return Wheel;
     }
 
@@ -111,120 +112,7 @@ public static class VehicleDefs
         MeshKit Hull = new();
         MeshKit Turret = new();
         MeshKit Rotor = new();
-        FVector4 Dark = Palette.Shade(Paint, 0.7f);
-
-        switch (Type)
-        {
-            case EVehicleType.Jeep:
-            case EVehicleType.Technical:
-            {
-                Hull.Box(new FVector3(0.0f, 0.85f, 0.0f), new FVector3(0.9f, 0.3f, 2.1f), Paint);
-                Hull.Box(new FVector3(0.0f, 1.2f, 1.35f), new FVector3(0.85f, 0.12f, 0.75f), Dark);
-                Hull.Box(new FVector3(0.0f, 1.45f, 0.5f), new FVector3(0.85f, 0.3f, 0.04f), Palette.Glass, FQuat.FromEuler(Mathf.Radians(-20.0f), 0.0f, 0.0f));
-                Hull.Box(new FVector3(0.45f, 1.35f, -0.1f), new FVector3(0.3f, 0.25f, 0.3f), Palette.Shade(Paint, 0.5f));
-                Hull.Box(new FVector3(-0.45f, 1.35f, -0.1f), new FVector3(0.3f, 0.25f, 0.3f), Palette.Shade(Paint, 0.5f));
-                Hull.Box(new FVector3(0.0f, 1.0f, 2.13f), new FVector3(0.8f, 0.15f, 0.05f), Palette.Steel);
-                if (Type == EVehicleType.Jeep)
-                {
-                    Hull.Tube(new FVector3(0.8f, 1.1f, -0.4f), new FVector3(0.8f, 2.0f, -0.4f), 0.05f, 0.05f, Palette.Gunmetal, 6);
-                    Hull.Tube(new FVector3(-0.8f, 1.1f, -0.4f), new FVector3(-0.8f, 2.0f, -0.4f), 0.05f, 0.05f, Palette.Gunmetal, 6);
-                    Hull.Tube(new FVector3(-0.8f, 2.0f, -0.4f), new FVector3(0.8f, 2.0f, -0.4f), 0.05f, 0.05f, Palette.Gunmetal, 6);
-                }
-                else
-                {
-                    Hull.Box(new FVector3(0.0f, 1.3f, -1.4f), new FVector3(0.9f, 0.18f, 0.9f), Dark);
-                    Hull.Tube(new FVector3(0.0f, 1.3f, -1.2f), new FVector3(0.0f, 2.0f, -1.2f), 0.08f, 0.08f, Palette.Gunmetal, 6);
-                    Turret.Box(new FVector3(0.0f, 0.0f, 0.1f), new FVector3(0.12f, 0.12f, 0.35f), Palette.Gunmetal);
-                    Turret.Tube(new FVector3(0.0f, 0.02f, 0.4f), new FVector3(0.0f, 0.02f, 1.1f), 0.04f, 0.04f, Palette.Gunmetal, 6);
-                    Turret.Box(new FVector3(0.0f, 0.2f, 0.05f), new FVector3(0.35f, 0.2f, 0.02f), Palette.Steel);
-                }
-
-                break;
-            }
-            case EVehicleType.Sedan:
-            {
-                Hull.Box(new FVector3(0.0f, 0.7f, 0.0f), new FVector3(0.88f, 0.28f, 2.2f), Paint);
-                Hull.Box(new FVector3(0.0f, 1.2f, -0.2f), new FVector3(0.8f, 0.25f, 1.1f), Palette.Glass);
-                Hull.Box(new FVector3(0.0f, 1.46f, -0.2f), new FVector3(0.78f, 0.03f, 0.95f), Paint);
-                break;
-            }
-            case EVehicleType.Truck:
-            case EVehicleType.FuelTruck:
-            {
-                Hull.Box(new FVector3(0.0f, 0.95f, 0.0f), new FVector3(1.15f, 0.2f, 3.6f), Palette.Gunmetal);
-                Hull.Box(new FVector3(0.0f, 1.9f, 2.55f), new FVector3(1.2f, 0.85f, 1.0f), Paint);
-                Hull.Box(new FVector3(0.0f, 2.15f, 3.56f), new FVector3(1.05f, 0.35f, 0.03f), Palette.Glass);
-                if (Type == EVehicleType.Truck)
-                {
-                    Hull.Box(new FVector3(0.0f, 1.35f, -1.0f), new FVector3(1.2f, 0.2f, 2.5f), Dark);
-                    Hull.Box(new FVector3(0.0f, 2.35f, -1.0f), new FVector3(1.18f, 0.8f, 2.45f), Palette.Canvas);
-                }
-                else
-                {
-                    Hull.Tube(new FVector3(0.0f, 2.2f, -3.4f), new FVector3(0.0f, 2.2f, 1.4f), 1.05f, 1.05f, Palette.Steel, 12);
-                    Hull.Box(new FVector3(0.0f, 2.2f, -1.0f), new FVector3(1.08f, 0.18f, 0.6f), Palette.FuelRed);
-                }
-
-                break;
-            }
-            case EVehicleType.Apc:
-            {
-                Hull.Box(new FVector3(0.0f, 1.35f, 0.0f), new FVector3(1.35f, 0.6f, 3.3f), Paint);
-                Hull.Box(new FVector3(0.0f, 1.65f, 3.05f), new FVector3(1.2f, 0.35f, 0.4f), Dark, FQuat.FromEuler(Mathf.Radians(35.0f), 0.0f, 0.0f));
-                Hull.Box(new FVector3(0.0f, 2.0f, -0.3f), new FVector3(1.2f, 0.12f, 2.6f), Dark);
-                Turret.Box(new FVector3(0.0f, 0.0f, 0.0f), new FVector3(0.7f, 0.35f, 0.8f), Paint);
-                Turret.Tube(new FVector3(0.0f, 0.05f, 0.6f), new FVector3(0.0f, 0.05f, 2.2f), 0.09f, 0.08f, Palette.Gunmetal, 6);
-                break;
-            }
-            case EVehicleType.Tank:
-            {
-                Hull.Box(new FVector3(1.35f, 0.6f, 0.0f), new FVector3(0.38f, 0.55f, 3.4f), Palette.Rubber);
-                Hull.Box(new FVector3(-1.35f, 0.6f, 0.0f), new FVector3(0.38f, 0.55f, 3.4f), Palette.Rubber);
-                for (int Roller = 0; Roller < 6; ++Roller)
-                {
-                    float Z = 2.6f - Roller * 1.04f;
-                    Hull.Tube(new FVector3(1.74f, 0.45f, Z), new FVector3(1.76f, 0.45f, Z), 0.36f, 0.36f, Palette.Gunmetal, 8);
-                    Hull.Tube(new FVector3(-1.76f, 0.45f, Z), new FVector3(-1.74f, 0.45f, Z), 0.36f, 0.36f, Palette.Gunmetal, 8);
-                }
-
-                Hull.Box(new FVector3(0.0f, 1.25f, 0.0f), new FVector3(1.7f, 0.5f, 3.5f), Paint);
-                Hull.Box(new FVector3(0.0f, 1.2f, 3.55f), new FVector3(1.6f, 0.35f, 0.3f), Dark, FQuat.FromEuler(Mathf.Radians(-30.0f), 0.0f, 0.0f));
-                Turret.Box(new FVector3(0.0f, 0.0f, 0.0f), new FVector3(1.25f, 0.42f, 1.6f), Paint);
-                Turret.Box(new FVector3(0.0f, 0.1f, -1.7f), new FVector3(1.0f, 0.3f, 0.35f), Dark);
-                Turret.Tube(new FVector3(0.0f, 0.05f, 1.4f), new FVector3(0.0f, 0.05f, 5.2f), 0.14f, 0.12f, Dark, 8);
-                Turret.Tube(new FVector3(0.0f, 0.05f, 4.6f), new FVector3(0.0f, 0.05f, 5.3f), 0.2f, 0.2f, Dark, 8);
-                Turret.Cylinder(new FVector3(0.5f, 0.42f, -0.4f), 0.35f, 0.25f, Dark, 8);
-                break;
-            }
-            case EVehicleType.AttackHeli:
-            case EVehicleType.TransportHeli:
-            {
-                bool bTransport = Type == EVehicleType.TransportHeli;
-                float Length = bTransport ? 3.5f : 2.6f;
-                float Girth = bTransport ? 1.4f : 0.95f;
-                Hull.Box(new FVector3(0.0f, 1.6f, 0.4f), new FVector3(Girth, Girth, Length), Paint);
-                Hull.Box(new FVector3(0.0f, 1.8f, Length + 0.6f), new FVector3(Girth * 0.8f, Girth * 0.7f, 0.6f), Palette.Glass);
-                Hull.Tube(new FVector3(0.0f, 2.0f, -Length + 0.4f), new FVector3(0.0f, 2.3f, -Length - 4.5f), 0.45f, 0.2f, Paint, 8);
-                Hull.Box(new FVector3(0.25f, 2.9f, -Length - 4.3f), new FVector3(0.05f, 0.8f, 0.4f), Dark);
-                Hull.Box(new FVector3(0.0f, 0.2f, 0.8f), new FVector3(Girth + 0.2f, 0.05f, 1.8f), Palette.Gunmetal);
-                Hull.Box(new FVector3(Girth * 0.9f, 0.45f, 0.8f), new FVector3(0.05f, 0.25f, 0.05f), Palette.Gunmetal);
-                Hull.Box(new FVector3(-Girth * 0.9f, 0.45f, 0.8f), new FVector3(0.05f, 0.25f, 0.05f), Palette.Gunmetal);
-                Hull.Cylinder(new FVector3(0.0f, 1.6f + Girth, 0.2f), 0.25f, 0.5f, Palette.Gunmetal, 8);
-                if (!bTransport)
-                {
-                    Hull.Box(new FVector3(0.0f, 1.3f, 0.2f), new FVector3(2.1f, 0.08f, 0.5f), Dark);
-                    Hull.Tube(new FVector3(1.8f, 1.1f, -0.4f), new FVector3(1.8f, 1.1f, 1.0f), 0.2f, 0.2f, Palette.Gunmetal, 8);
-                    Hull.Tube(new FVector3(-1.8f, 1.1f, -0.4f), new FVector3(-1.8f, 1.1f, 1.0f), 0.2f, 0.2f, Palette.Gunmetal, 8);
-                    Hull.Tube(new FVector3(0.0f, 0.8f, 2.4f), new FVector3(0.0f, 0.8f, 3.4f), 0.06f, 0.06f, Palette.Gunmetal, 6);
-                }
-
-                float Span = bTransport ? 8.5f : 7.0f;
-                Rotor.Box(FVector3.Zero, new FVector3(Span, 0.04f, 0.28f), Palette.Hex(0x222222));
-                Rotor.Box(FVector3.Zero, new FVector3(0.28f, 0.04f, Span), Palette.Hex(0x222222));
-                break;
-            }
-        }
-
+        VehicleShapes.Build(Type, Paint, Hull, Turret, Rotor);
         return new EntityHull(Hull, Turret.IsEmpty ? null : Turret, Rotor.IsEmpty ? null : Rotor);
     }
 }

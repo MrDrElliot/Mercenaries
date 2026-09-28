@@ -83,9 +83,10 @@ public sealed class MercPlayer : EntityScript, IDamageable
     private bool bReady;
     private Action? PendingInteract;
 
-    public Entity Owner => Entity;
+    // Shells and hits outlive whoever fired them, so a destroyed script answers with no entity rather than throwing.
+    public Entity Owner => IsValid ? Entity : Entity.Null;
     public EFaction Faction => EFaction.Merc;
-    public bool IsAlive => !bDead && bReady;
+    public bool IsAlive => IsValid && !bDead && bReady;
     public bool IsPlayerControlled => true;
     public FVector3 Position => CachedPosition;
     public float Radius => 0.5f;
@@ -791,8 +792,16 @@ public sealed class MercPlayer : EntityScript, IDamageable
         IsSprinting = false;
         HumanoidBody.RemoveCapsule(Registry, Entity);
         World.SetParent(Entity, Target.Owner);
-        Registry.Get<STransformComponent>(Entity).SetLocalLocation(new FVector3(0.0f, 1.2f, 0.0f));
-        BodyTransform?.SetLocalScale(new FVector3(0.001f));
+        if (Target.Definition.DriverSeat is { } Seat)
+        {
+            Registry.Get<STransformComponent>(Entity).SetLocalTransform(new FTransform(Seat, FQuat.Identity, FVector3.One));
+            HumanoidBody.PoseSeated(Registry, Rig);
+        }
+        else
+        {
+            Registry.Get<STransformComponent>(Entity).SetLocalLocation(new FVector3(0.0f, 1.2f, 0.0f));
+            BodyTransform?.SetLocalScale(new FVector3(0.001f));
+        }
         Target.EnterPlayer(this);
         Mercs.Contracts.OnPlayerEnteredVehicle(Target);
     }
@@ -842,6 +851,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
         }
 
         Controller?.AddYaw(CurrentYaw);
+        HumanoidBody.ResetLimbs(Registry, Rig);
         BodyTransform?.SetLocalScale(FVector3.One);
         CachedPosition = At;
     }
@@ -905,8 +915,12 @@ public sealed class MercPlayer : EntityScript, IDamageable
         }
 
         float Remaining = Health.ApplyDamage(Amount, Hit.Source);
-        Mercs.Director?.OnPlayerDamaged(Hit);
-        if (Mercs.Director is { bDevCheats: true })
+        // God mode takes no damage, so it gets no red flash and no log line either.
+        if (Amount > 0.0f)
+        {
+            Mercs.Director?.OnPlayerDamaged(Hit);
+        }
+        if (Amount > 0.0f && Mercs.Director is { bDevCheats: true })
         {
             string From = Hit.Source.IsNull || !World.IsValidEntity(Hit.Source) ? "?" : World.GetEntityName(Hit.Source);
             Debug.Log($"[PlayerHit] {Amount:0} {Hit.Kind} from {From} -> {Remaining:0}");

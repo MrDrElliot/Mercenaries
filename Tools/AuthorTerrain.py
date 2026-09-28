@@ -201,7 +201,7 @@ def AuthorGrass():
         Call("assets.delete", {"Asset": Type, "bForce": True})
     Call("assets.create", {"ClassName": "CGrassType", "Folder": TextureFolder, "Name": "GT_Grass"})
     Settings = {"Mesh": Mesh, "Density": 6.0, "MinWeight": 0.5, "ScaleMin": 0.65, "ScaleMax": 1.15, "AlignToNormal": 0.5,
-                "MaxSlopeDegrees": 32.0, "CullDistance": 60.0, "bCastShadow": False, "bReceiveShadow": True, "Seed": 7}
+                "MaxSlopeDegrees": 32.0, "CullDistance": 150.0, "FullDensityDistance": 30.0, "bCastShadow": False, "bReceiveShadow": True, "Seed": 7}
     for Field, Value in Settings.items():
         Call("assets.set_property", {"Asset": Type, "Path": Field, "Value": json.dumps(Value)})
     Call("assets.save", {"Asset": Type})
