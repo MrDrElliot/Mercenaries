@@ -35,3 +35,6 @@ bin/
 # Editor scratch
 imgui.ini
 *.log
+
+# Python bytecode from the Tools scripts
+__pycache__/

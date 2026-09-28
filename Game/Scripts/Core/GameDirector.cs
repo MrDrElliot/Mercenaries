@@ -21,6 +21,8 @@ public sealed class GameDirector : EntityScript
 
     private int CheatSite;
     private int VantageIndex;
+    // A spawned vehicle only becomes enterable once its script is ready, a frame or two later.
+    private Vehicle? PendingRide;
     public bool bGodMode;
     private bool bBuilt;
     private float SiteTimer;
@@ -31,13 +33,14 @@ public sealed class GameDirector : EntityScript
         Materials.Reset();
         Controls.Reset();
         Terrain.Reset();
+        HumanoidBody.Reset();
         Sfx.Reset();
         Mercs.Wallet.Cash = StartingCash;
 
         DateTime Started = DateTime.Now;
         new WorldBuilder(World).Build();
         Mercs.Fx.Initialize();
-        Mercs.Destruction.Initialize();
+        Gore.Reset();
         Mercs.Ordnance.Initialize();
 
         Site? Hq = Mercs.Sites.Find(Site => Site.Kind == ESiteKind.PmcHq);
@@ -86,12 +89,17 @@ public sealed class GameDirector : EntityScript
             return;
         }
 
+        Mercs.bInfantryNavReady = CNavigationLibrary.IsReady(World);
+        Mercs.bVehicleNavReady = CNavigationLibrary.IsReady(World, Mercs.VehicleNavAgent);
+
         float Step = MathF.Min(DeltaTime, 0.1f);
         Mercs.Time += Step;
 
+        Mercs.Clock.Update(Step);
         Mercs.Factions.Update(Step);
         Mercs.Feed.Update(Step);
         Mercs.Fx.Update(Step);
+        Gore.Update(Step);
         Mercs.Ordnance.Update(Step);
         Mercs.Throwables.Update(Step);
         Mercs.Support.Update(Step);
@@ -125,10 +133,18 @@ public sealed class GameDirector : EntityScript
         }
 
         float Yaw = MercCamera.Instance?.Yaw ?? 0.0f;
+        bool bShift = Controls.KeyDown(EKey.LeftShift);
+
+        if (PendingRide is { IsAlive: true } Ride)
+        {
+            Player.EnterVehicle(Ride);
+            PendingRide = null;
+        }
 
         if (Controls.KeyPressed(EKey.D5))
         {
-            Spawner.SpawnVehicle(EVehicleType.Jeep, EFaction.Merc, OpenSpotNear(Player, Yaw, 12.0f), Yaw, false, null, null);
+            Vehicle? Jeep = Spawner.SpawnVehicle(EVehicleType.Jeep, EFaction.Merc, OpenSpotNear(Player, Yaw, 12.0f), Yaw, false, null, null);
+            PendingRide = bShift ? Jeep : null;
         }
 
         if (Controls.KeyPressed(EKey.D6))
@@ -154,9 +170,25 @@ public sealed class GameDirector : EntityScript
             }
         }
 
+        // Kills the nearest soldier in front, by a headshot or with Shift by a grenade at their feet, to check gore up close.
+        if (Controls.KeyPressed(EKey.K) && NearestInFront(Player, Yaw) is { } Victim)
+        {
+            FVector3 Head = Victim.Position + new FVector3(0.0f, 0.7f, 0.0f);
+            if (bShift)
+            {
+                Explosion.Detonate(Victim.Position - new FVector3(0.0f, 0.6f, 0.0f), 3.0f, 320.0f, Player, 1.0f, true, Player);
+            }
+            else
+            {
+                FVector3 ShotDirection = (Head - (Player.Position + new FVector3(0.0f, 0.6f, 0.0f))).NormalizedOr(Geo.Heading(Yaw));
+                Gore.Wound(Head, ShotDirection, 209.0f, Victim.Owner);
+                Victim.TakeHit(FHit.From(Player, 209.0f, EDamageKind.Bullet, Head, ShotDirection));
+            }
+        }
+
         if (Controls.KeyPressed(EKey.D8))
         {
-            FVector3 Drop = OpenSpotNear(Player, Yaw, 30.0f);
+            FVector3 Drop = OpenSpotNear(Player, Yaw, bShift ? 10.0f : 30.0f);
 
             for (int Index = 0; Index < 4; ++Index)
             {
@@ -201,10 +233,16 @@ public sealed class GameDirector : EntityScript
 
         if (Controls.KeyPressed(EKey.D2))
         {
-            Spawner.SpawnVehicle(EVehicleType.AttackHeli, EFaction.Merc, OpenSpotNear(Player, Yaw, 9.0f), Yaw, false, null, null);
+            Vehicle? Heli = Spawner.SpawnVehicle(EVehicleType.AttackHeli, EFaction.Merc, OpenSpotNear(Player, Yaw, 9.0f), Yaw, false, null, null);
+            PendingRide = bShift ? Heli : null;
         }
 
-        if (Controls.KeyPressed(EKey.D3) && MercCamera.Instance is { } Camera)
+        if (Controls.KeyPressed(EKey.D3) && bShift)
+        {
+            Mercs.Clock.Skip(3.0f);
+            Mercs.Feed.Post($"Time {Mercs.Clock.Hour:00}:{Mercs.Clock.Minute:00}", ENewsTone.Neutral);
+        }
+        else if (Controls.KeyPressed(EKey.D3) && MercCamera.Instance is { } Camera)
         {
             Camera.Yaw += 90.0f;
         }
@@ -258,8 +296,26 @@ public sealed class GameDirector : EntityScript
 
         if (Controls.KeyPressed(EKey.D9))
         {
-            Spawner.SpawnVehicle(EVehicleType.Tank, EFaction.VZ, OpenSpotNear(Player, Yaw, 9.0f), Yaw, true, null, null);
+            Vehicle? Tank = Spawner.SpawnVehicle(EVehicleType.Tank, bShift ? EFaction.Merc : EFaction.VZ, OpenSpotNear(Player, Yaw, 9.0f), Yaw, !bShift, null, null);
+            PendingRide = bShift ? Tank : null;
         }
+    }
+
+    private static Soldier? NearestInFront(MercPlayer Player, float Yaw)
+    {
+        Soldier? Best = null;
+        float BestDistance = 60.0f;
+        foreach (Soldier Candidate in Mercs.Soldiers)
+        {
+            FVector3 Offset = Candidate.Position - Player.Position;
+            float Distance = Offset.Length;
+            if (Candidate.IsAlive && Distance < BestDistance && FVector3.Dot(Geo.Flat(Offset).NormalizedOr(FVector3.Zero), Geo.Heading(Yaw)) > 0.3f)
+            {
+                Best = Candidate;
+                BestDistance = Distance;
+            }
+        }
+        return Best;
     }
 
     private static FVector3 OpenSpotNear(MercPlayer Player, float Yaw, float Distance)

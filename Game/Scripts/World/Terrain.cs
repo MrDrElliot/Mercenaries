@@ -9,7 +9,7 @@ public struct FPad
 {
     public FVector3 Center;
     public float Radius;
-    public FVector4 Color;
+    public bool bPaved;
 }
 
 public struct FRoad
@@ -19,17 +19,32 @@ public struct FRoad
     public float Width;
 }
 
+// Painted layers of M_Terrain, in the order its Custom Slang block samples them.
+public enum ETerrainLayer
+{
+    Grass,
+    Rock,
+    Sand,
+    Dirt,
+    Paved,
+}
+
 public static class Terrain
 {
     public const float HalfSize = 520.0f;
-    public const int Cells = 130;
-    public const int ChunkCells = 26;
-    public const float CellSize = HalfSize * 2.0f / Cells;
+    public const int Resolution = 1025;
+    public const float TileSize = HalfSize * 2.0f;
+    public const float SampleSpacing = TileSize / (Resolution - 1);
     public const float IslandRadius = 430.0f;
     public const float SeaLevel = 0.0f;
+    public const string MaterialPath = "/Game/Content/Materials/M_Terrain.lasset";
+
+    // The heightmap stores 0 to 1, so the terrain entity sits below the seabed and spans every height above it.
+    private const float BaseHeight = -16.0f;
+    private const float HeightRange = 128.0f;
+    private const int LayerCount = 5;
 
     private static float[] Heights = Array.Empty<float>();
-    private static FVector4[] Colors = Array.Empty<FVector4>();
     private static readonly List<FPad> Pads = new();
     private static readonly List<FRoad> Roads = new();
     private static readonly List<float> PadHeights = new();
@@ -39,7 +54,6 @@ public static class Terrain
     public static void Reset()
     {
         Heights = Array.Empty<float>();
-        Colors = Array.Empty<FVector4>();
         Pads.Clear();
         Roads.Clear();
         PadHeights.Clear();
@@ -50,9 +64,9 @@ public static class Terrain
         return MathF.Max(RawHeight(Center.X, Center.Z), 2.5f);
     }
 
-    public static void AddPad(FVector3 Center, float Radius, FVector4 Color)
+    public static void AddPad(FVector3 Center, float Radius, bool bPaved)
     {
-        Pads.Add(new FPad { Center = Center, Radius = Radius, Color = Color });
+        Pads.Add(new FPad { Center = Center, Radius = Radius, bPaved = bPaved });
         PadHeights.Add(PadHeight(Center));
     }
 
@@ -88,12 +102,18 @@ public static class Terrain
         return MathF.Exp(-(DX * DX + DZ * DZ) / (2.0f * Sigma * Sigma));
     }
 
-    private static float ShapedHeight(float X, float Z, out float PadWeight, out FVector4 PadColor, out float RoadWeight)
+    private struct FGroundShape
     {
-        float Height = RawHeight(X, Z);
-        PadWeight = 0.0f;
-        PadColor = Palette.Dirt;
-        RoadWeight = 0.0f;
+        public float Height;
+        public float PadWeight;
+        public bool bPavedPad;
+        public float RoadWeight;
+        public float RoadShoulder;
+    }
+
+    private static FGroundShape ShapeGround(float X, float Z)
+    {
+        FGroundShape Shape = new() { Height = RawHeight(X, Z) };
 
         for (int Index = 0; Index < Pads.Count; ++Index)
         {
@@ -105,12 +125,14 @@ public static class Terrain
                 continue;
             }
 
-            Height = Mathf.Lerp(Height, PadHeights[Index], Blend);
-            float Paint = 1.0f - Mathf.SmoothStep(Pad.Radius - 4.0f, Pad.Radius + 2.0f, Distance);
-            if (Paint > PadWeight)
+            Shape.Height = Mathf.Lerp(Shape.Height, PadHeights[Index], Blend);
+            // A ragged edge, so a site's ground frays into the grass instead of ending on a perfect circle.
+            float Fray = (Noise.Value(X * 0.15f, Z * 0.15f) - 0.5f) * 5.0f;
+            float Paint = 1.0f - Mathf.SmoothStep(Pad.Radius - 4.0f, Pad.Radius + 2.0f, Distance + Fray);
+            if (Paint > Shape.PadWeight)
             {
-                PadWeight = Paint;
-                PadColor = Pad.Color;
+                Shape.PadWeight = Paint;
+                Shape.bPavedPad = Pad.bPaved;
             }
         }
 
@@ -134,161 +156,154 @@ public static class Terrain
             }
 
             float CenterHeight = MathF.Max(Mathf.Lerp(Road.From.Y, Road.To.Y, T) * 0.5f + RawHeight(PX, PZ) * 0.5f, 1.2f);
-            Height = Mathf.Lerp(Height, CenterHeight, Blend * 0.85f);
+            Shape.Height = Mathf.Lerp(Shape.Height, CenterHeight, Blend * 0.85f);
             float Paint = 1.0f - Mathf.SmoothStep(Road.Width * 0.5f - 1.0f, Road.Width * 0.5f + 0.5f, Distance);
-            RoadWeight = MathF.Max(RoadWeight, Paint);
+            float Shoulder = 1.0f - Mathf.SmoothStep(Road.Width * 0.5f, Road.Width * 0.5f + 2.5f, Distance);
+            Shape.RoadWeight = MathF.Max(Shape.RoadWeight, Paint);
+            Shape.RoadShoulder = MathF.Max(Shape.RoadShoulder, Shoulder);
         }
 
-        return Height;
+        return Shape;
+    }
+
+    // Bumps a meter or so across, which the old 8 meter mesh could not hold; roads and sites stay graded flat.
+    private static float Relief(float X, float Z, float Flatten)
+    {
+        float Rolling = (Noise.Fbm(X * 0.045f + 31.0f, Z * 0.045f - 17.0f) - 0.5f) * 1.1f;
+        float Bumps = (Noise.Value(X * 0.4f, Z * 0.4f) - 0.5f) * 0.18f;
+        return (Rolling + Bumps) * (1.0f - Flatten);
     }
 
     public static void Build(CWorld World, EntityRegistry Registry)
     {
-        int Verts = Cells + 1;
-        Heights = new float[Verts * Verts];
-        Colors = new FVector4[Verts * Verts];
+        int Count = Resolution * Resolution;
+        Heights = new float[Count];
+        FGroundShape[] Shapes = new FGroundShape[Count];
 
-        for (int Row = 0; Row < Verts; ++Row)
+        System.Threading.Tasks.Parallel.For(0, Resolution, Row =>
         {
-            for (int Col = 0; Col < Verts; ++Col)
+            float Z = -HalfSize + Row * SampleSpacing;
+            for (int Col = 0; Col < Resolution; ++Col)
             {
-                float X = -HalfSize + Col * CellSize;
-                float Z = -HalfSize + Row * CellSize;
-                float Height = ShapedHeight(X, Z, out float PadWeight, out FVector4 PadColor, out float RoadWeight);
-                Heights[Row * Verts + Col] = Height;
-                Colors[Row * Verts + Col] = SurfaceColor(X, Z, Height, PadWeight, PadColor, RoadWeight);
+                float X = -HalfSize + Col * SampleSpacing;
+                FGroundShape Shape = ShapeGround(X, Z);
+                float Flatten = MathF.Max(Shape.PadWeight, Shape.RoadShoulder);
+                Shape.Height += Relief(X, Z, Flatten);
+                Shapes[Row * Resolution + Col] = Shape;
+                Heights[Row * Resolution + Col] = Shape.Height;
             }
-        }
+        });
 
-        using (new FPhysicsBatchScope(World))
+        float[] Normalized = new float[Count];
+        byte[] Weights = new byte[LayerCount * Count];
+        System.Threading.Tasks.Parallel.For(0, Resolution, Row =>
         {
-            for (int ChunkZ = 0; ChunkZ < Cells / ChunkCells; ++ChunkZ)
+            Span<float> Layer = stackalloc float[LayerCount];
+            float Z = -HalfSize + Row * SampleSpacing;
+            for (int Col = 0; Col < Resolution; ++Col)
             {
-                for (int ChunkX = 0; ChunkX < Cells / ChunkCells; ++ChunkX)
+                int Index = Row * Resolution + Col;
+                float X = -HalfSize + Col * SampleSpacing;
+                Normalized[Index] = Mathf.Clamp01((Heights[Index] - BaseHeight) / HeightRange);
+                PaintLayers(X, Z, Shapes[Index], SlopeAtSample(Row, Col), Layer);
+                for (int L = 0; L < LayerCount; ++L)
                 {
-                    BuildChunk(World, Registry, ChunkX, ChunkZ);
+                    Weights[L * Count + Index] = (byte)(Mathf.Clamp01(Layer[L]) * 255.0f + 0.5f);
                 }
             }
+        });
+
+        Entity Ground = World.CreateEntity("Terrain", new FVector3(0.0f, BaseHeight, 0.0f));
+        STerrainComponent Surface = Registry.GetOrAdd<STerrainComponent>(Ground)!;
+        Surface.Resolution = Resolution;
+        Surface.ChunkResolution = 64;
+        Surface.TileWorldSize = TileSize;
+        Surface.MaxHeight = HeightRange;
+        Surface.Layers.Resize(LayerCount);
+        Surface.Heightmap.Assign(Normalized);
+        Surface.LayerWeights.Assign(Weights);
+        if (Asset.Load<CMaterialInterface>(MaterialPath) is { } Material)
+        {
+            Surface.Material = Material;
         }
+        else
+        {
+            Debug.LogWarning($"Mercenaries: {MaterialPath} is missing, run Tools/AuthorTerrain.py with the editor open.");
+        }
+
+        STerrainColliderComponent Collider = Registry.GetOrAdd<STerrainColliderComponent>(Ground)!;
+        Collider.bAffectsNavigation = true;
+        SRigidBodyComponent Body = Registry.GetOrAdd<SRigidBodyComponent>(Ground)!;
+        Body.BodyType = EBodyType.Static;
+
+        // Species come from the material's grass outputs; the component only switches the scatter on and bounds it.
+        SGrassComponent Grass = Registry.GetOrAdd<SGrassComponent>(Ground)!;
+        Grass.MaxDrawDistance = 75.0f;
+        Grass.MaxInstancesPerSpecies = 1u << 17;
 
         BuildSea(World, Registry);
     }
 
-    private static FVector4 SurfaceColor(float X, float Z, float Height, float PadWeight, FVector4 PadColor, float RoadWeight)
+    // Composited bottom to top, each layer covering what is under it by its own coverage.
+    private static void PaintLayers(float X, float Z, FGroundShape Shape, float Slope, Span<float> Layer)
     {
-        float Variation = Noise.Fbm(X * 0.03f + 11.0f, Z * 0.03f - 7.0f);
-        FVector4 Color = Palette.Mix(Palette.Grass, Palette.GrassDry, Mathf.Clamp01(Variation * 1.6f - 0.4f));
+        Layer.Clear();
+        Layer[(int)ETerrainLayer.Grass] = 1.0f;
 
-        float Jungle = Mathf.SmoothStep(80.0f, 260.0f, Z) * Mathf.Clamp01(Noise.Fbm(X * 0.01f, Z * 0.01f) * 2.0f - 0.3f);
-        Color = Palette.Mix(Color, Palette.Jungle, Jungle * 0.8f);
+        float Patches = Noise.Fbm(X * 0.021f - 5.0f, Z * 0.021f + 9.0f);
+        Cover(Layer, ETerrainLayer.Dirt, Mathf.SmoothStep(0.64f, 0.78f, Patches) * 0.85f);
+        Cover(Layer, ETerrainLayer.Dirt, Shape.RoadShoulder * 0.8f);
 
-        float Slope = SlopeAt(X, Z);
-        Color = Palette.Mix(Color, Palette.Rock, Mathf.SmoothStep(0.35f, 0.7f, Slope));
-        Color = Palette.Mix(Color, Palette.Rock, Mathf.SmoothStep(26.0f, 40.0f, Height));
-        Color = Palette.Mix(Color, Palette.Sand, 1.0f - Mathf.SmoothStep(1.2f, 3.2f, Height));
-        Color = Palette.Mix(Color, Palette.Shade(Palette.Sand, 0.7f), 1.0f - Mathf.SmoothStep(-2.0f, 0.5f, Height));
-        Color = Palette.Mix(Color, PadColor, PadWeight * 0.9f);
-        Color = Palette.Mix(Color, Palette.Road, RoadWeight);
-        return Color;
+        float RockNoise = (Noise.Value(X * 0.08f, Z * 0.08f) - 0.5f) * 0.18f;
+        Cover(Layer, ETerrainLayer.Rock, MathF.Max(Mathf.SmoothStep(0.6f, 0.95f, Slope + RockNoise), Mathf.SmoothStep(28.0f, 40.0f, Shape.Height)));
+
+        float Beach = 1.0f - Mathf.SmoothStep(1.1f, 2.9f, Shape.Height + (Patches - 0.5f) * 1.5f);
+        Cover(Layer, ETerrainLayer.Sand, Beach);
+
+        Cover(Layer, Shape.bPavedPad ? ETerrainLayer.Paved : ETerrainLayer.Dirt, Shape.PadWeight * 0.95f);
+        Cover(Layer, ETerrainLayer.Paved, Shape.RoadWeight);
     }
 
-    private static float SlopeAt(float X, float Z)
+    private static void Cover(Span<float> Layer, ETerrainLayer Top, float Coverage)
     {
-        float Step = CellSize;
-        float DX = RawHeight(X + Step, Z) - RawHeight(X - Step, Z);
-        float DZ = RawHeight(X, Z + Step) - RawHeight(X, Z - Step);
-        return MathF.Sqrt(DX * DX + DZ * DZ) / (2.0f * Step);
+        Coverage = Mathf.Clamp01(Coverage);
+        for (int L = 0; L < Layer.Length; ++L)
+        {
+            Layer[L] *= 1.0f - Coverage;
+        }
+        Layer[(int)Top] += Coverage;
     }
 
-    private static void BuildChunk(CWorld World, EntityRegistry Registry, int ChunkX, int ChunkZ)
+    private static float SlopeAtSample(int Row, int Col)
     {
-        int Verts = Cells + 1;
-        int Side = ChunkCells + 1;
-        int StartCol = ChunkX * ChunkCells;
-        int StartRow = ChunkZ * ChunkCells;
-
-        FVector3[] Positions = new FVector3[Side * Side];
-        FVector3[] Normals = new FVector3[Side * Side];
-        FVector4[] VertexColors = new FVector4[Side * Side];
-        FVector2[] UVs = new FVector2[Side * Side];
-        int[] Indices = new int[ChunkCells * ChunkCells * 6];
-
-        FVector3 Origin = new(-HalfSize + StartCol * CellSize, 0.0f, -HalfSize + StartRow * CellSize);
-
-        for (int Row = 0; Row < Side; ++Row)
-        {
-            for (int Col = 0; Col < Side; ++Col)
-            {
-                int GlobalRow = StartRow + Row;
-                int GlobalCol = StartCol + Col;
-                int Local = Row * Side + Col;
-                float Height = Heights[GlobalRow * Verts + GlobalCol];
-                Positions[Local] = new FVector3(Col * CellSize, Height, Row * CellSize);
-                VertexColors[Local] = Palette.ToLinear(Colors[GlobalRow * Verts + GlobalCol]);
-                UVs[Local] = new FVector2(Col * 0.5f, Row * 0.5f);
-
-                float Left = Heights[GlobalRow * Verts + Math.Max(GlobalCol - 1, 0)];
-                float Right = Heights[GlobalRow * Verts + Math.Min(GlobalCol + 1, Cells)];
-                float Down = Heights[Math.Max(GlobalRow - 1, 0) * Verts + GlobalCol];
-                float Up = Heights[Math.Min(GlobalRow + 1, Cells) * Verts + GlobalCol];
-                Normals[Local] = new FVector3(Left - Right, 2.0f * CellSize, Down - Up).Normalized();
-            }
-        }
-
-        int Cursor = 0;
-        for (int Row = 0; Row < ChunkCells; ++Row)
-        {
-            for (int Col = 0; Col < ChunkCells; ++Col)
-            {
-                int V00 = Row * Side + Col;
-                int V10 = V00 + 1;
-                int V01 = V00 + Side;
-                int V11 = V01 + 1;
-
-                Indices[Cursor++] = V00;
-                Indices[Cursor++] = V11;
-                Indices[Cursor++] = V10;
-                Indices[Cursor++] = V00;
-                Indices[Cursor++] = V01;
-                Indices[Cursor++] = V11;
-            }
-        }
-
-        Entity Chunk = World.CreateEntity($"Terrain_{ChunkX}_{ChunkZ}", Origin);
-        SDynamicMeshComponent Mesh = Registry.GetOrAdd<SDynamicMeshComponent>(Chunk)!;
-        Mesh.bGenerateTangents = false;
-        Mesh.bFastMeshletBuild = true;
-        Mesh.ClearMesh();
-        Mesh.SetPositions(Positions);
-        Mesh.SetNormals(Normals);
-        Mesh.SetUVs(UVs);
-        Mesh.SetColors(VertexColors);
-        Mesh.SetIndices(Indices);
-        Mesh.AddSection(0, 0, Indices.Length);
-        if (Materials.Solid is { } Material)
-        {
-            Mesh.SetMaterialAtSlot(Material, 0);
-        }
-
-        Mesh.Commit();
-
-        SDynamicMeshColliderComponent Collider = Registry.GetOrAdd<SDynamicMeshColliderComponent>(Chunk)!;
-        Collider.bConvex = false;
-        Collider.bAffectsNavigation = true;
-        SRigidBodyComponent Body = Registry.GetOrAdd<SRigidBodyComponent>(Chunk)!;
-        Body.BodyType = EBodyType.Static;
+        int Left = Math.Max(Col - 1, 0);
+        int Right = Math.Min(Col + 1, Resolution - 1);
+        int Down = Math.Max(Row - 1, 0);
+        int Up = Math.Min(Row + 1, Resolution - 1);
+        float DX = (Heights[Row * Resolution + Right] - Heights[Row * Resolution + Left]) / ((Right - Left) * SampleSpacing);
+        float DZ = (Heights[Up * Resolution + Col] - Heights[Down * Resolution + Col]) / ((Up - Down) * SampleSpacing);
+        return MathF.Sqrt(DX * DX + DZ * DZ);
     }
 
+    // The engine's water body, so the sea has waves, shoreline foam and reflections, and floats whatever carries a buoyancy component.
     private static void BuildSea(CWorld World, EntityRegistry Registry)
     {
-        MeshKit Kit = new();
-        float Extent = 3000.0f;
-        Kit.Quad(new FVector3(-Extent, 0, -Extent), new FVector3(Extent, 0, -Extent), new FVector3(Extent, 0, Extent), new FVector3(-Extent, 0, Extent), FVector3.Up, Palette.Water);
-        Entity Sea = World.CreateEntity("Sea", new FVector3(0.0f, SeaLevel - 0.35f, 0.0f));
-        Kit.Commit(Registry, Sea, false, false);
+        Entity Sea = World.CreateEntity("Sea", new FVector3(0.0f, SeaLevel - 0.2f, 0.0f));
+        SWaterComponent Water = Registry.GetOrAdd<SWaterComponent>(Sea)!;
+        Water.Extent = new FVector2(6000.0f, 6000.0f);
+        Water.GridResolution = 512;
+        // Out to the camera's far plane, so the sea meets the sky at the horizon instead of ending a few kilometers out.
+        Water.HorizonExtent = 60000.0f;
+        Water.WaveAmplitude = 0.35f;
+        Water.WaveLength = 28.0f;
+        Water.WindSpeed = 6.0f;
+        Water.Choppiness = 0.5f;
+        Water.ShallowColor = new FVector3(0.12f, 0.62f, 0.62f);
+        Water.DeepColor = new FVector3(0.02f, 0.16f, 0.30f);
+        Water.bBuoyancy = true;
     }
 
-    // Interpolates across the same triangle split the mesh uses, so feet and wheels sit on the drawn surface.
+    // Interpolates across the same triangle split the terrain draws, so feet and wheels sit on the drawn surface.
     public static float HeightAt(float X, float Z)
     {
         if (Heights.Length == 0)
@@ -296,9 +311,9 @@ public static class Terrain
             return RawHeight(X, Z);
         }
 
-        float GX = (X + HalfSize) / CellSize;
-        float GZ = (Z + HalfSize) / CellSize;
-        if (GX < 0.0f || GZ < 0.0f || GX >= Cells || GZ >= Cells)
+        float GX = (X + HalfSize) / SampleSpacing;
+        float GZ = (Z + HalfSize) / SampleSpacing;
+        if (GX < 0.0f || GZ < 0.0f || GX >= Resolution - 1 || GZ >= Resolution - 1)
         {
             return -12.0f;
         }
@@ -307,11 +322,10 @@ public static class Terrain
         int Row = (int)GZ;
         float FX = GX - Col;
         float FZ = GZ - Row;
-        int Verts = Cells + 1;
-        float H00 = Heights[Row * Verts + Col];
-        float H10 = Heights[Row * Verts + Col + 1];
-        float H01 = Heights[(Row + 1) * Verts + Col];
-        float H11 = Heights[(Row + 1) * Verts + Col + 1];
+        float H00 = Heights[Row * Resolution + Col];
+        float H10 = Heights[Row * Resolution + Col + 1];
+        float H01 = Heights[(Row + 1) * Resolution + Col];
+        float H11 = Heights[(Row + 1) * Resolution + Col + 1];
 
         if (FX >= FZ)
         {

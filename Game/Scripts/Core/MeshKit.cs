@@ -42,17 +42,19 @@ public sealed class MeshKit : MeshBuilder
 {
     public CStaticMesh? BuildStaticMesh(CWorld World, bool bGlow = false) => BuildStaticMesh(World, bGlow ? Materials.Glow : Materials.Solid);
 
-    public static void Show(EntityRegistry Registry, Entity Target, CStaticMesh? Mesh, bool bCastShadow = true)
+    // Anything that moves opts out of decals, since a mark stays where it landed while the mesh drives on through it.
+    public static void Show(EntityRegistry Registry, Entity Target, CStaticMesh? Mesh, bool bCastShadow = true, bool bReceiveDecals = true)
     {
         SStaticMeshComponent? Component = Registry.GetOrAdd<SStaticMeshComponent>(Target);
         if (Component is not null && Mesh is not null)
         {
             Component.StaticMesh = Mesh;
             Component.bCastShadow = bCastShadow;
+            Component.bReceiveDecals = bReceiveDecals;
         }
     }
 
-    public bool Commit(EntityRegistry Registry, Entity Target, bool bGlow = false, bool bCastShadow = true)
+    public bool Commit(EntityRegistry Registry, Entity Target, bool bGlow = false, bool bCastShadow = true, bool bReceiveDecals = true)
     {
         SDynamicMeshComponent? Mesh = Registry.GetOrAdd<SDynamicMeshComponent>(Target);
         if (Mesh is null)
@@ -63,6 +65,7 @@ public sealed class MeshKit : MeshBuilder
         Mesh.bGenerateTangents = false;
         Mesh.bFastMeshletBuild = true;
         Mesh.bCastShadow = bCastShadow;
+        Mesh.bReceiveDecals = bReceiveDecals;
         return CommitTo(Mesh, bGlow ? Materials.Glow : Materials.Solid);
     }
 }

@@ -65,7 +65,9 @@ public sealed class MercPlayer : EntityScript, IDamageable
     private SCharacterControllerComponent? Controller => Registry.TryGet<SCharacterControllerComponent>(Entity);
     private SCharacterMovementComponent? Movement => Registry.TryGet<SCharacterMovementComponent>(Entity);
     private SHealthComponent? Health => Registry.TryGet<SHealthComponent>(Entity);
-    private Entity Body = Entity.Null;
+    private HumanoidRig? Rig;
+    private Entity Body => Rig?.Body ?? Entity.Null;
+    private Entity Corpse = Entity.Null;
     private STransformComponent? BodyTransform => Body.IsNull ? null : Registry.TryGet<STransformComponent>(Body);
     private FVector3 CachedPosition;
     private FVector3 LastPosition;
@@ -131,7 +133,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
             Created.RegenDelay = 4.0f;
         }
 
-        Body = HumanoidBody.Build(World, Entity, EFaction.Merc, EWeapon.Rifle, false);
+        Rig = HumanoidBody.BuildRig(World, Entity, EFaction.Merc, EWeapon.Rifle, false);
         CEntityLibrary.SetTag(World, Entity, "Player");
 
         Mercs.Player = this;
@@ -211,7 +213,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
             Health?.ApplyDamage(12.0f * DeltaTime, Entity.Null);
             if (Health is not null && Health.Health <= 0.0f)
             {
-                Die();
+                Die(new FHit { Kind = EDamageKind.Melee, Point = CachedPosition, Direction = FVector3.Up });
             }
         }
     }
@@ -284,6 +286,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
 
         float Speed = Movement is not null ? Geo.Flat(Movement.Velocity).Length : 0.0f;
         HumanoidBody.AnimateWalk(BodyTransform, Speed, ref WalkPhase, DeltaTime);
+        HumanoidBody.AnimateLimbs(Registry, Rig, Speed, WalkPhase, true);
         TickFootsteps(Speed, DeltaTime);
 
     }
@@ -518,7 +521,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
         TurnToward(Geo.YawOf(Best.Position - CachedPosition), 3600.0f, 1.0f);
         Sfx.At(ESfx.MeleeHit, Best.Position, 0.7f, 30.0f, 2.0f, 0.1f);
         Best.TakeHit(FHit.From(this, 45.0f, EDamageKind.Melee, Best.Position + new FVector3(0.0f, 0.4f, 0.0f), Forward));
-        CCameraLibrary.PlayImpactShake(World, 0.25f, 0.15f);
+        CameraShake.Impact(0.2f, 0.15f);
         HitMarkerTime = 0.2f;
     }
 
@@ -858,6 +861,7 @@ public sealed class MercPlayer : EntityScript, IDamageable
             Throttle = Move.Y,
             Steer = Move.X,
             bBoost = Controls.Down(EControl.Sprint),
+            bHandbrake = Controls.Down(EControl.Jump),
             bFirePrimary = Controls.Down(EControl.Fire),
             bFireSecondary = Controls.Down(EControl.Aim),
             bHasAim = Camera is not null,
@@ -915,11 +919,11 @@ public sealed class MercPlayer : EntityScript, IDamageable
 
         if (Remaining <= 0.0f)
         {
-            Die();
+            Die(Hit);
         }
     }
 
-    private void Die()
+    private void Die(FHit Hit)
     {
         if (bDead)
         {
@@ -941,10 +945,15 @@ public sealed class MercPlayer : EntityScript, IDamageable
             RestoreOnFoot(Geo.Ground(CachedPosition) + new FVector3(0.0f, 1.2f, 0.0f));
         }
 
+        SetBodyHidden(false);
         bDead = true;
         RespawnTimer = 6.0f;
+        FVector3 Carry = Movement is { } Moving ? Moving.Velocity : FVector3.Zero;
         HumanoidBody.RemoveCapsule(Registry, Entity);
-        HumanoidBody.PoseDead(BodyTransform, 0.0f);
+        if (Rig is not null)
+        {
+            Corpse = Gore.Kill(Rig, Hit, Carry, RespawnTimer + 20.0f, 0.0f, true);
+        }
         Mercs.Feed.Announce("MISSION FAILED", $"{MercName(Merc)} is down. Evac to the PMC in a few seconds.", 5.0f);
     }
 
@@ -973,10 +982,33 @@ public sealed class MercPlayer : EntityScript, IDamageable
         }
 
         Grenades = Math.Max(Grenades, 2);
+        // The last body went to physics with the death, so the evac brings back a fresh one.
+        if (Body.IsNull || !Registry.Valid(Body))
+        {
+            Rig = HumanoidBody.BuildRig(World, Entity, EFaction.Merc, EWeapon.Rifle, false);
+        }
         BodyTransform?.SetLocalTransform(new FTransform(FVector3.Zero, FQuat.Identity, FVector3.One));
+        Corpse = Entity.Null;
+        bBodyHidden = false;
         RestoreOnFoot(Spawn);
         Mercs.Factions.SetDisguise(EFaction.None);
     }
+
+    private bool bBodyHidden;
+
+    public void SetBodyHidden(bool bHidden)
+    {
+        if (bHidden == bBodyHidden || CurrentVehicle is not null || bDead)
+        {
+            return;
+        }
+
+        bBodyHidden = bHidden;
+        BodyTransform?.SetLocalScale(bHidden ? new FVector3(0.001f) : FVector3.One);
+    }
+
+    // What the camera looks at, which is the fallen torso while the merc is down.
+    public Entity ViewTarget => bDead && Registry.Valid(Corpse) ? Corpse : Entity;
 
     public void AddAmmo(float Fraction)
     {

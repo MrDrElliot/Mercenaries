@@ -14,6 +14,9 @@ public struct FVehicleInput
     public bool bFirePrimary;
     public bool bFireSecondary;
     public bool bBoost;
+    public bool bHandbrake;
+    // Path following is steering this frame, so the throttle and steer fields are left unused.
+    public bool bAutopilot;
     public bool bHasAim;
     public FVector3 AimPoint;
     public float DesiredYaw;
@@ -27,7 +30,7 @@ public enum EDriver : byte
     Player,
 }
 
-// Arcade vehicles are kinematic bodies moved by script, so the physics scene still sweeps them into props.
+// Ground vehicles are dynamic bodies driven through the engine's raycast wheels, and aircraft are dynamic bodies held up by rotor thrust.
 public sealed class Vehicle : EntityScript, IDamageable
 {
     [Property(Category = "Vehicle")]
@@ -49,14 +52,12 @@ public sealed class Vehicle : EntityScript, IDamageable
     private float Health;
     private float Speed;
     private float Yaw;
-    private float Pitch;
-    private float Roll;
-    private float VerticalSpeed;
-    private FVector3 AirVelocity;
     private FVector3 Pos;
     private float TurretYaw;
     private float TurretPitch;
     private float RotorAngle;
+    private float RotorSpool;
+    private FVehicleInput AirInput;
     private bool bDestroyed;
     private bool bBurning;
     private float BurnTime;
@@ -65,6 +66,10 @@ public sealed class Vehicle : EntityScript, IDamageable
     private const float VehicleFireScale = 0.6f;
     private const float WreckFireScale = 1.0f;
     private float SinkTime;
+    private float FallSpeed;
+    private float CrashCooldown;
+    private float UpsideDownTime;
+    private FQuat BodyRotation = FQuat.Identity;
     private bool bDropping;
     private bool bReady;
     private int PodSide = 1;
@@ -77,9 +82,19 @@ public sealed class Vehicle : EntityScript, IDamageable
     private WeaponState? SecondaryWeapon;
 
     private Entity TurretEntity = Entity.Null;
+    private Entity HeadlightEntity = Entity.Null;
     private Entity RotorEntity = Entity.Null;
     private STransformComponent? TurretTransform => TurretEntity.IsNull ? null : Registry.TryGet<STransformComponent>(TurretEntity);
     private STransformComponent? RotorTransform => RotorEntity.IsNull ? null : Registry.TryGet<STransformComponent>(RotorEntity);
+    private SVehicleComponent? Drivetrain => Def.bAir || bDestroyed ? null : Registry.TryGet<SVehicleComponent>(Entity);
+    private SPathFollowComponent? Autopilot => Def.bAir || bDestroyed ? null : Registry.TryGet<SPathFollowComponent>(Entity);
+    private FVector3 AutopilotGoal;
+    private bool bAutopiloting;
+
+    private const float WheelTravel = 0.3f;
+    private const float SuspensionFrequency = 1.6f;
+    // How far the suspension settles under the vehicle's own weight, so the wheels rest where the hull expects them.
+    private static readonly float RestSag = 9.81f / MathF.Pow(2.0f * MathF.PI * SuspensionFrequency, 2.0f);
 
     private IDamageable? AiTarget;
     private bool bAiTargetVisible;
@@ -100,15 +115,15 @@ public sealed class Vehicle : EntityScript, IDamageable
     public bool IsCrewed => bCrewed && !bDestroyed && Driver == EDriver.Ai;
     public bool IsEmpty => !bCrewed && Rider is null && !bDestroyed;
     public float HealthFraction => Def is null ? 0.0f : Mathf.Clamp01(Health / Def.MaxHealth);
-    public float CurrentSpeed => Def.bAir ? AirVelocity.Length : MathF.Abs(Speed);
+    public float CurrentSpeed => Def.bAir ? Velocity.Length : MathF.Abs(Speed);
     public float Heading => Yaw;
     public FVector3 GroundPosition => Pos;
 
     public bool EngineRunning => !bDestroyed && (Driver != EDriver.None || bDropping);
 
-    public float EngineLoad => Mathf.Clamp01((Def.bAir ? AirVelocity.Length : MathF.Abs(Speed)) / Def.MaxSpeed);
+    public float EngineLoad => Mathf.Clamp01(CurrentSpeed / Def.MaxSpeed);
     public bool IsBurning => bBurning;
-    public FVector3 Velocity => Def.bAir ? AirVelocity + new FVector3(0.0f, VerticalSpeed, 0.0f) : Geo.Heading(Yaw) * Speed;
+    public FVector3 Velocity => CPhysicsLibrary.GetLinearVelocity(World, Entity);
     public WeaponState? Primary => PrimaryWeapon;
     public WeaponState? Secondary => SecondaryWeapon;
     public float Altitude => Pos.Y - MathF.Max(Terrain.HeightAt(Pos.X, Pos.Z), Terrain.SeaLevel);
@@ -132,7 +147,8 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
         else if (!Def.bAir)
         {
-            Pos.Y = Terrain.HeightAt(Pos.X, Pos.Z);
+            // Dropped onto its suspension from just above the slope, since a hull corner starting inside the ground mesh can be pushed through it.
+            Pos.Y = Terrain.HeightAt(Pos.X, Pos.Z) + 0.5f;
         }
         else if (Pos.Y < Terrain.HeightAt(Pos.X, Pos.Z) + 1.0f)
         {
@@ -144,8 +160,18 @@ public sealed class Vehicle : EntityScript, IDamageable
         PrimaryWeapon = Def.Primary != EWeapon.None ? new WeaponState(Def.Primary) : null;
         SecondaryWeapon = Def.Secondary != EWeapon.None ? new WeaponState(Def.Secondary) : null;
 
+        BodyRotation = Def.bAir ? Geo.Orientation(Yaw, 0.0f, 0.0f) : FQuat.FromToRotation(FVector3.Up, Terrain.NormalAt(Pos.X, Pos.Z)) * Geo.Orientation(Yaw, 0.0f, 0.0f);
+        PlaceBody();
         BuildVisuals(PaintFor(Team, Type));
-        BuildBody(EBodyType.Kinematic);
+        RotorSpool = Def.bAir && bCrewed ? 1.0f : 0.0f;
+        BuildBody(EBodyType.Dynamic);
+        if (!Def.bAir)
+        {
+            BuildDrivetrain();
+        }
+
+        SAIStimuliSourceComponent Visible = Registry.GetOrAdd<SAIStimuliSourceComponent>(Entity)!;
+        Visible.SightTargetOffset = new FVector3(0.0f, Def.Clearance + Def.HalfExtents.Y, 0.0f);
         ApplyTransform();
 
         Mercs.Vehicles.Add(this);
@@ -181,7 +207,7 @@ public sealed class Vehicle : EntityScript, IDamageable
     private void BuildVisuals(FVector4 Paint)
     {
         EntityHull Hulls = VehicleDefs.BuildHull(Type, Paint);
-        Hulls.Hull.Commit(Registry, Entity);
+        Hulls.Hull.Commit(Registry, Entity, false, true, false);
 
         if (Hulls.Turret is not null)
         {
@@ -192,7 +218,20 @@ public sealed class Vehicle : EntityScript, IDamageable
                 TurretTransform?.SetLocalLocation(Def.TurretOffset);
             }
 
-            Hulls.Turret.Commit(Registry, TurretEntity);
+            Hulls.Turret.Commit(Registry, TurretEntity, false, true, false);
+        }
+
+        if (!Def.bAir && HeadlightEntity.IsNull)
+        {
+            HeadlightEntity = World.CreateEntity("Headlights", FVector3.Zero);
+            World.SetParent(HeadlightEntity, Entity);
+            Registry.Get<STransformComponent>(HeadlightEntity).SetLocalLocation(new FVector3(0.0f, Def.Clearance + Def.HalfExtents.Y, Def.HalfExtents.Z + 0.1f));
+            SSpotLightComponent Beam = Registry.GetOrAdd<SSpotLightComponent>(HeadlightEntity)!;
+            Beam.LightColor = new FVector3(1.0f, 0.93f, 0.8f);
+            Beam.Intensity = 0.0f;
+            Beam.InnerConeAngle = 18.0f;
+            Beam.OuterConeAngle = 34.0f;
+            Beam.Attenuation = 45.0f;
         }
 
         if (Hulls.Rotor is not null)
@@ -205,7 +244,7 @@ public sealed class Vehicle : EntityScript, IDamageable
                 RotorTransform?.SetLocalLocation(new FVector3(0.0f, RotorHeight, 0.2f));
             }
 
-            Hulls.Rotor.Commit(Registry, RotorEntity, false, false);
+            Hulls.Rotor.Commit(Registry, RotorEntity, false, false, false);
         }
     }
 
@@ -223,14 +262,107 @@ public sealed class Vehicle : EntityScript, IDamageable
             Body.bOverrideMass = true;
             Body.bUseGravity = BodyType == EBodyType.Dynamic;
             Body.bAllowSleeping = true;
+            Body.bUseContinuousCollision = BodyType == EBodyType.Dynamic;
+            // Low in the hull, which is what keeps a hard turn from rolling the vehicle.
+            Body.CenterOfMassOffset = new FVector3(0.0f, -Def.HalfExtents.Y * 0.9f, 0.0f);
+            if (!bDestroyed)
+            {
+                Body.OnContactBegin.Bind(OnHullContact);
+            }
+        }
+    }
+
+    // Skids and bumpers soak up a gentle knock, and anything harder damages the hull and whatever it struck.
+    private void OnHullContact(SCollisionEvent Contact)
+    {
+        IDamageable? Other = Mercs.FindDamageable(Contact.Other);
+        float Threshold = Def.bAir ? AirCrashSpeed : GroundCrashSpeed;
+        if (bDestroyed || Contact.ImpactSpeed < Threshold || Other is Soldier or MercPlayer || CrashCooldown > 0.0f)
+        {
+            return;
+        }
+
+        // One collision reports from several contact points, so the cooldown keeps it from dealing its damage more than once.
+        CrashCooldown = 0.5f;
+        float Crash = (Contact.ImpactSpeed - Threshold) * (Def.bAir ? 40.0f : Def.bHeavy ? 8.0f : 20.0f);
+        TakeHit(new FHit { Amount = Crash, Kind = EDamageKind.Crush, Point = Contact.Point, Direction = Contact.Normal, Source = Other?.Owner ?? Entity.Null });
+        Other?.TakeHit(FHit.From(this, Crash * (Def.bHeavy ? 3.0f : 1.0f), EDamageKind.Crush, Contact.Point, -Contact.Normal));
+        Mercs.Fx.Impact(Contact.Point, Contact.Normal, true);
+        if (IsPlayerControlled)
+        {
+            CameraShake.Impact(MathF.Min(0.8f, Contact.ImpactSpeed * 0.05f), 0.3f);
+        }
+    }
+
+    private void BuildDrivetrain()
+    {
+        SVehicleComponent Car = Registry.GetOrAdd<SVehicleComponent>(Entity)!;
+        Car.Steering = Def.bSkidSteer ? EVehicleSteering.Skid : EVehicleSteering.Wheels;
+        Car.MaxSpeed = Def.MaxSpeed;
+        Car.MaxReverseSpeed = Def.MaxSpeed * 0.45f;
+        Car.Acceleration = Def.Acceleration;
+        Car.SkidTurnRate = Def.TurnRate;
+        Car.SuspensionFrequency = SuspensionFrequency;
+        Car.TireGrip = Def.bHeavy ? 1.5f : 1.2f;
+        Car.Wheels.Clear();
+
+        SPathFollowComponent Route = Registry.GetOrAdd<SPathFollowComponent>(Entity)!;
+        Route.NavAgent = Mercs.VehicleNavAgent;
+        Route.AcceptanceRadius = 4.0f;
+        Route.RepathInterval = 2.0f;
+        Route.RepathDistance = 4.0f;
+        Route.VehicleBrakingDistance = 10.0f;
+
+        Dictionary<(float, float), CStaticMesh?> Meshes = new();
+        foreach (FWheelSpec Spec in Def.Wheels)
+        {
+            Entity Visual = Entity.Null;
+            if (Spec.bVisual)
+            {
+                if (!Meshes.TryGetValue((Spec.Radius, Spec.Width), out CStaticMesh? Mesh))
+                {
+                    Mesh = VehicleDefs.BuildWheel(Spec.Radius, Spec.Width).BuildStaticMesh(World);
+                    Meshes[(Spec.Radius, Spec.Width)] = Mesh;
+                }
+
+                Visual = World.CreateEntity("Wheel", FVector3.Zero);
+                World.SetParent(Visual, Entity);
+                MeshKit.Show(Registry, Visual, Mesh, true, false);
+            }
+
+            FVector3 Mount = new(Spec.X, Spec.Radius + WheelTravel - RestSag, Spec.Z);
+            Car.AddWheel(Mount, Spec.Radius, WheelTravel, Spec.bSteer, true, Spec.Z < 0.0f, Visual.Id);
+        }
+    }
+
+    // Lit only after dark with someone at the wheel, which also makes an occupied vehicle visible from afar at night.
+    private void UpdateHeadlights()
+    {
+        if (!HeadlightEntity.IsNull && Registry.TryGet<SSpotLightComponent>(HeadlightEntity) is { } Beam)
+        {
+            Beam.Intensity = !bDestroyed && Driver != EDriver.None && Mercs.Clock.IsNight ? 60.0f : 0.0f;
+        }
+    }
+
+    private void PlaceBody()
+    {
+        World.SetEntityLocation(Entity, Pos);
+        World.SetEntityRotation(Entity, BodyRotation);
+    }
+
+    // Physics owns a ground vehicle's pose, so the script reads it back rather than integrating its own.
+    private void SyncFromBody()
+    {
+        Pos = World.GetEntityLocation(Entity);
+        if (Registry.TryGet<STransformComponent>(Entity) is { } Transform)
+        {
+            BodyRotation = Transform.GetWorldRotation();
+            Yaw = Geo.YawOf(Geo.Flat(BodyRotation.Rotate(FVector3.Forward)).NormalizedOr(Geo.Heading(Yaw)));
         }
     }
 
     private void ApplyTransform()
     {
-        World.SetEntityLocation(Entity, Pos);
-        World.SetEntityRotation(Entity, Geo.Orientation(Yaw, Pitch, Roll));
-
         if (TurretTransform is not null)
         {
             float RelativeYaw = Mathf.DeltaAngleDegrees(Yaw, TurretYaw);
@@ -243,7 +375,7 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
     }
 
-    public FVector3 TurretPivot => Def.bTurret ? Pos + Geo.Orientation(Yaw, Pitch, Roll).Rotate(Def.TurretOffset) : Position + Geo.Heading(Yaw) * Def.HalfExtents.Z;
+    public FVector3 TurretPivot => Def.bTurret ? Pos + BodyRotation.Rotate(Def.TurretOffset) : Position + Geo.Heading(Yaw) * Def.HalfExtents.Z;
 
     public float DistanceToHull(FVector3 Point)
     {
@@ -342,6 +474,7 @@ public sealed class Vehicle : EntityScript, IDamageable
             float Distance = FVector3.Distance(Pos, Mercs.PlayerPosition);
             if (Distance > 420.0f && !Def.bAir)
             {
+                Drivetrain?.SetInput(0.0f, 0.0f);
                 return;
             }
 
@@ -376,98 +509,109 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
 
         TickDamageFx(DeltaTime);
+        UpdateHeadlights();
         ApplyTransform();
     }
 
+    // Held at a parachute's pace until it is close to the ground, then physics sets it down.
     private void TickDrop(float DeltaTime)
     {
-        float Ground = Terrain.HeightAt(Pos.X, Pos.Z);
-        Pos.Y -= 7.0f * DeltaTime;
-        Roll = MathF.Sin(Mercs.Time * 1.3f) * 4.0f;
-        if (Pos.Y <= Ground)
+        SyncFromBody();
+        if (Pos.Y > Terrain.HeightAt(Pos.X, Pos.Z) + 1.5f)
         {
-            Pos.Y = Ground;
-            bDropping = false;
-            Roll = 0.0f;
-            Mercs.Fx.Puff(Pos + new FVector3(0.0f, 0.5f, 0.0f), 4.0f, 2.5f, false, new FVector3(0.0f, 1.0f, 0.0f));
-            Mercs.Feed.Post($"{Def.Name} delivered.", ENewsTone.Good);
+            CPhysicsLibrary.SetLinearVelocity(World, Entity, new FVector3(0.0f, -7.0f, 0.0f));
+            return;
         }
+
+        bDropping = false;
+        Mercs.Fx.Puff(Pos + new FVector3(0.0f, 0.5f, 0.0f), 4.0f, 2.5f, false, new FVector3(0.0f, 1.0f, 0.0f));
+        Mercs.Feed.Post($"{Def.Name} delivered.", ENewsTone.Good);
     }
 
     private void TickGround(float DeltaTime, FVehicleInput Input)
     {
-        float Max = Def.MaxSpeed * (Input.bBoost ? 1.2f : 1.0f);
-        float Target = Input.Throttle >= 0.0f ? Input.Throttle * Max : Input.Throttle * Max * 0.45f;
-        float Accel = Def.Acceleration;
-        if (MathF.Abs(Input.Throttle) < 0.05f)
+        SyncFromBody();
+        SVehicleComponent? Car = Drivetrain;
+        if (Car is null)
         {
-            Accel *= 0.6f;
-        }
-        else if (MathF.Sign(Target) != MathF.Sign(Speed) && MathF.Abs(Speed) > 0.5f)
-        {
-            Accel *= 2.4f;
+            return;
         }
 
-        Speed = Mathf.MoveTowards(Speed, Target, Accel * DeltaTime);
+        bool bFlooding = SinkTime > 0.0f;
+        Car.MaxSpeed = Def.MaxSpeed * (Input.bBoost ? 1.2f : 1.0f);
+        if (!Input.bAutopilot || bFlooding)
+        {
+            StopAutopilot();
+            Car.SetInput(bFlooding ? 0.0f : Input.Throttle, Input.Steer, bFlooding ? 1.0f : 0.0f, Input.bHandbrake);
+        }
+        Speed = Car.ForwardSpeed;
 
-        bool bTracked = Type == EVehicleType.Tank;
-        float SteerFactor = bTracked ? 1.0f : MathF.Max(Mathf.Clamp01(MathF.Abs(Speed) / 5.0f), MathF.Abs(Input.Throttle) > 0.1f ? 0.35f : 0.0f);
-        float Direction = Speed < -0.2f && !bTracked ? -1.0f : 1.0f;
-        Yaw += Input.Steer * Def.TurnRate * SteerFactor * Direction * DeltaTime;
+        bool bStuck = MathF.Abs(Input.Throttle) > 0.3f && MathF.Abs(Speed) < 0.8f;
+        BlockedTime = bStuck ? BlockedTime + DeltaTime : 0.0f;
+
+        TickLanding(Car);
+        TickRighting(DeltaTime);
+        TickFellThrough();
 
         FVector3 Forward = Geo.Heading(Yaw);
-        FVector3 Move = Forward * Speed * DeltaTime;
-
-        if (MathF.Abs(Speed) > 0.3f && CheckObstacle(Forward * MathF.Sign(Speed), MathF.Abs(Speed) * DeltaTime))
+        CrashCooldown -= DeltaTime;
+        if (MathF.Abs(Speed) > 0.3f)
         {
-            Move = FVector3.Zero;
+            CheckObstacle(Forward * MathF.Sign(Speed), MathF.Abs(Speed) * DeltaTime);
         }
 
-        FVector3 Next = Pos + Move;
-        float Ground = Terrain.HeightAt(Next.X, Next.Z);
-
-        if (Pos.Y > Ground + 0.4f || VerticalSpeed > 0.0f)
-        {
-            VerticalSpeed -= 22.0f * DeltaTime;
-            Next.Y = Pos.Y + VerticalSpeed * DeltaTime;
-            if (Next.Y <= Ground)
-            {
-                if (VerticalSpeed < -14.0f)
-                {
-                    TakeHit(new FHit { Amount = (-VerticalSpeed - 14.0f) * 25.0f, Kind = EDamageKind.Crush, Point = Position, Direction = FVector3.Up });
-                }
-
-                Next.Y = Ground;
-                VerticalSpeed = 0.0f;
-            }
-        }
-        else
-        {
-            Next.Y = Ground;
-        }
-
-        Pos = Next;
-        UpdateTilt(Forward, DeltaTime);
         CrushInfantry();
-        if (Mercs.Destruction.CrushFoliage(Pos, Forward, Def.HalfExtents.X, Def.HalfExtents.Z, MathF.Abs(Speed), Def.bHeavy) > 0 && !Def.bHeavy)
-        {
-            Speed *= 0.85f;
-        }
+        Mercs.Destruction.CrushFoliage(Pos, Forward, Def.HalfExtents.X, Def.HalfExtents.Z, MathF.Abs(Speed), Def.bHeavy);
         CheckWater(DeltaTime);
     }
 
-    private void UpdateTilt(FVector3 Forward, float DeltaTime)
+    // A last resort for a body that tunneled through the ground mesh, which would otherwise fall until it reached the sea floor.
+    private void TickFellThrough()
     {
-        FVector3 Right = Geo.RightOf(Yaw);
-        float Front = Terrain.HeightAt(Pos.X + Forward.X * Def.HalfExtents.Z, Pos.Z + Forward.Z * Def.HalfExtents.Z);
-        float Back = Terrain.HeightAt(Pos.X - Forward.X * Def.HalfExtents.Z, Pos.Z - Forward.Z * Def.HalfExtents.Z);
-        float Left = Terrain.HeightAt(Pos.X - Right.X * Def.HalfExtents.X, Pos.Z - Right.Z * Def.HalfExtents.X);
-        float RightH = Terrain.HeightAt(Pos.X + Right.X * Def.HalfExtents.X, Pos.Z + Right.Z * Def.HalfExtents.X);
-        float TargetPitch = Mathf.Degrees(MathF.Atan2(Front - Back, Def.HalfExtents.Z * 2.0f));
-        float TargetRoll = Mathf.Degrees(MathF.Atan2(RightH - Left, Def.HalfExtents.X * 2.0f));
-        float Blend = Mathf.Clamp01(DeltaTime * 8.0f);
-        Pitch = Mathf.Lerp(Pitch, TargetPitch, Blend);
-        Roll = Mathf.Lerp(Roll, TargetRoll, Blend);
+        if (Pos.Y > Terrain.HeightAt(Pos.X, Pos.Z) - 3.0f || Terrain.HeightAt(Pos.X, Pos.Z) < Terrain.SeaLevel)
+        {
+            return;
+        }
+
+        Pos = Geo.Ground(Pos) + new FVector3(0.0f, 1.0f, 0.0f);
+        BodyRotation = Geo.Orientation(Yaw, 0.0f, 0.0f);
+        PlaceBody();
+        CPhysicsLibrary.SetLinearVelocity(World, Entity, FVector3.Zero);
+        CPhysicsLibrary.SetAngularVelocity(World, Entity, FVector3.Zero);
+    }
+
+    // Nobody can climb out and push, so a vehicle left on its roof is set back on its wheels after a while.
+    private void TickRighting(float DeltaTime)
+    {
+        bool bUpsideDown = BodyRotation.Rotate(FVector3.Up).Y < 0.3f && MathF.Abs(Speed) < 2.0f;
+        UpsideDownTime = bUpsideDown ? UpsideDownTime + DeltaTime : 0.0f;
+        if (UpsideDownTime < 4.0f)
+        {
+            return;
+        }
+
+        UpsideDownTime = 0.0f;
+        Pos = Geo.Ground(Pos) + new FVector3(0.0f, 1.0f, 0.0f);
+        BodyRotation = Geo.Orientation(Yaw, 0.0f, 0.0f);
+        PlaceBody();
+        CPhysicsLibrary.SetLinearVelocity(World, Entity, FVector3.Zero);
+        CPhysicsLibrary.SetAngularVelocity(World, Entity, FVector3.Zero);
+    }
+
+    // A long fall hurts on the landing, which the suspension alone would soak up without a scratch.
+    private void TickLanding(SVehicleComponent Car)
+    {
+        if (!Car.IsGrounded())
+        {
+            FallSpeed = MathF.Min(FallSpeed, Velocity.Y);
+            return;
+        }
+
+        if (FallSpeed < -14.0f)
+        {
+            TakeHit(new FHit { Amount = (-FallSpeed - 14.0f) * 25.0f, Kind = EDamageKind.Crush, Point = Position, Direction = FVector3.Up });
+        }
+        FallSpeed = 0.0f;
     }
 
     private bool CheckObstacle(FVector3 Direction, float Distance)
@@ -497,32 +641,17 @@ public sealed class Vehicle : EntityScript, IDamageable
                 continue;
             }
 
+            // Knocked down just ahead of the bumper, so a flimsy prop gives way rather than stopping the hull dead.
             float Impact = MathF.Abs(Speed);
             if (Other is Structure Prop && ((Prop.IsFlimsy && Impact > 5.0f) || (Def.bHeavy && Prop.IsCrushableByArmor && Impact > 2.0f)))
             {
                 Prop.TakeHit(FHit.From(this, 99999.0f, EDamageKind.Crush, Hit.Location, Direction));
-                Speed *= 0.8f;
                 continue;
             }
 
-            if (Impact > 9.0f)
-            {
-                float Crash = (Impact - 9.0f) * (Def.bHeavy ? 8.0f : 20.0f);
-                TakeHit(new FHit { Amount = Crash, Kind = EDamageKind.Crush, Point = Hit.Location, Direction = -Direction, Source = Other?.Owner ?? Entity.Null });
-                Other?.TakeHit(FHit.From(this, Crash * (Def.bHeavy ? 3.0f : 1.0f), EDamageKind.Crush, Hit.Location, Direction));
-                Mercs.Fx.Impact(Hit.Location, Hit.Normal, true);
-                if (IsPlayerControlled)
-                {
-                    CCameraLibrary.PlayImpactShake(World, MathF.Min(1.5f, Impact * 0.06f), 0.3f);
-                }
-            }
-
-            Speed = -Speed * 0.25f;
-            BlockedTime += World.DeltaTime;
             return true;
         }
 
-        BlockedTime = 0.0f;
         return false;
     }
 
@@ -577,7 +706,6 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
 
         SinkTime += DeltaTime;
-        Speed *= MathF.Max(0.0f, 1.0f - DeltaTime * 2.0f);
         if (SinkTime > 3.0f)
         {
             Mercs.Feed.Post($"{Def.Name} flooded.", ENewsTone.Bad);
@@ -585,71 +713,83 @@ public sealed class Vehicle : EntityScript, IDamageable
         }
     }
 
+    private const float Gravity = 9.81f;
+    private const float RotorSpoolTime = 3.0f;
+    private const float ClimbRate = 10.0f;
+    private const float MaxVerticalAccel = 8.0f;
+    private const float MaxThrustToWeight = 2.2f;
+    private const float MaxLeanDegrees = 28.0f;
+    private const float LandedAltitude = 0.8f;
+    private const float CeilingAltitude = 160.0f;
+    private const float AirCrashSpeed = 7.0f;
+    private const float GroundCrashSpeed = 9.0f;
+
+    // The rotor needs a driver to keep turning, so an abandoned helicopter winds down and falls out of the sky.
     private void TickAir(float DeltaTime, FVehicleInput Input)
     {
-        RotorAngle += DeltaTime * 28.0f;
+        SyncFromBody();
+        AirInput = Input;
+        CrashCooldown -= DeltaTime;
+        RotorSpool = Mathf.MoveTowards(RotorSpool, Driver != EDriver.None ? 1.0f : 0.0f, DeltaTime / RotorSpoolTime);
+        RotorAngle += DeltaTime * 28.0f * RotorSpool;
 
-        if (Input.bHasDesiredYaw)
+        if (Pos.Y < Terrain.SeaLevel - 0.5f)
         {
-            Yaw = Mathf.MoveTowardsAngleDegrees(Yaw, Input.DesiredYaw, Def.TurnRate * DeltaTime);
+            Mercs.Feed.Post($"{Def.Name} ditched in the sea.", ENewsTone.Bad);
+            Destroy(new FHit { Kind = EDamageKind.Crush, Direction = FVector3.Up }, false);
         }
-        else
+    }
+
+    public override void OnFixedUpdate(float FixedDeltaTime)
+    {
+        if (bReady && !bDestroyed && !bDropping && Def.bAir && Mercs.IsRunning && RotorSpool > 0.0f)
         {
-            Yaw += Input.Steer * Def.TurnRate * DeltaTime;
+            Fly(FixedDeltaTime);
         }
+    }
 
-        FVector3 Forward = Geo.Heading(Yaw);
-        FVector3 Right = Geo.RightOf(Yaw);
-        float Ground = MathF.Max(Terrain.HeightAt(Pos.X, Pos.Z), Terrain.SeaLevel);
-        bool bLanded = Pos.Y <= Ground + 0.1f;
+    // Thrust pushes along the rotor mast, so the hull leans toward where it wants to go and the lean is what carries it there.
+    private void Fly(float DeltaTime)
+    {
+        FVehicleInput Input = AirInput;
+        FQuat Rotation = CPhysicsLibrary.GetBodyRotation(World, Entity);
+        FVector3 Velocity = CPhysicsLibrary.GetLinearVelocity(World, Entity);
+        FVector3 Spin = CPhysicsLibrary.GetAngularVelocity(World, Entity);
+        FVector3 Mast = Rotation.Rotate(FVector3.Up);
+        float HeadingYaw = Geo.YawOf(Geo.Flat(Rotation.Rotate(FVector3.Forward)).NormalizedOr(Geo.Heading(Yaw)));
+        FVector3 Forward = Geo.Heading(HeadingYaw);
+        FVector3 Right = Geo.RightOf(HeadingYaw);
 
-        FVector3 Desired = (Forward * Input.Throttle + Right * Input.Strafe) * Def.MaxSpeed * (Input.bBoost ? 1.2f : 1.0f);
-        if (bLanded && Input.Lift <= 0.0f)
+        float Lift = Pos.Y > CeilingAltitude ? MathF.Min(Input.Lift, 0.0f) : Input.Lift;
+        bool bParked = Altitude < LandedAltitude && Lift <= 0.0f;
+
+        FVector3 Desired = bParked ? FVector3.Zero : (Forward * Input.Throttle + Right * Input.Strafe) * Def.MaxSpeed * (Input.bBoost ? 1.2f : 1.0f);
+        FVector3 Push = Desired - Geo.Flat(Velocity);
+        FVector3 HorizontalAccel = Push.Length > Def.Acceleration ? Push.Normalized() * Def.Acceleration : Push;
+        float VerticalAccel = Math.Clamp((Lift * ClimbRate - Velocity.Y) * 2.0f, -MaxVerticalAccel, MaxVerticalAccel);
+        float Support = bParked ? Gravity * 0.5f : Gravity + VerticalAccel;
+
+        float MaxLean = Support * MathF.Tan(Mathf.Radians(MaxLeanDegrees));
+        if (HorizontalAccel.Length > MaxLean)
         {
-            Desired = FVector3.Zero;
-        }
-
-        AirVelocity = FVector3.MoveTowards(AirVelocity, Desired, Def.Acceleration * DeltaTime);
-        VerticalSpeed = Mathf.MoveTowards(VerticalSpeed, Input.Lift * 10.0f, 14.0f * DeltaTime);
-
-        FVector3 Step = (AirVelocity + new FVector3(0.0f, VerticalSpeed, 0.0f)) * DeltaTime;
-        if (AirVelocity.LengthSquared > 1.0f)
-        {
-            FVector3 From = Position;
-            FVector3 Along = AirVelocity.Normalized();
-            SRayResult Hit = Geo.Trace(From, From + Along * (Def.HalfExtents.Z + AirVelocity.Length * DeltaTime + 1.0f), Entity, Rider?.Owner ?? Entity.Null);
-            if (Hit.bHit && Mercs.FindDamageable(new Entity(Hit.Entity)) is not (Soldier or MercPlayer))
-            {
-                float Impact = AirVelocity.Length;
-                AirVelocity = -AirVelocity * 0.3f;
-                Step = FVector3.Zero;
-                if (Impact > 10.0f)
-                {
-                    TakeHit(new FHit { Amount = Impact * 12.0f, Kind = EDamageKind.Crush, Point = Hit.Location, Direction = -Along });
-                }
-            }
-        }
-
-        Pos += Step;
-        float NewGround = MathF.Max(Terrain.HeightAt(Pos.X, Pos.Z), Terrain.SeaLevel);
-        if (Pos.Y < NewGround)
-        {
-            if (VerticalSpeed < -9.0f)
-            {
-                TakeHit(new FHit { Amount = -VerticalSpeed * 30.0f, Kind = EDamageKind.Crush, Point = Pos, Direction = FVector3.Up });
-            }
-
-            Pos.Y = NewGround;
-            VerticalSpeed = MathF.Max(0.0f, VerticalSpeed);
+            HorizontalAccel = HorizontalAccel.Normalized() * MaxLean;
         }
 
-        Pos.Y = MathF.Min(Pos.Y, 160.0f);
+        FVector3 WantedMast = bParked ? FVector3.Up : (HorizontalAccel + FVector3.Up * Support).NormalizedOr(FVector3.Up);
+        float Mass = CPhysicsLibrary.GetMass(World, Entity);
+        float Thrust = Math.Clamp(Mass * Support / MathF.Max(Mast.Y, 0.5f), 0.0f, Mass * Gravity * MaxThrustToWeight) * RotorSpool;
+        CPhysicsLibrary.AddForce(World, Entity, Mast * Thrust);
 
-        float ForwardSpeed = FVector3.Dot(AirVelocity, Forward);
-        float SideSpeed = FVector3.Dot(AirVelocity, Right);
-        float Blend = Mathf.Clamp01(DeltaTime * 3.0f);
-        Pitch = Mathf.Lerp(Pitch, -ForwardSpeed / Def.MaxSpeed * 14.0f, Blend);
-        Roll = Mathf.Lerp(Roll, -SideSpeed / Def.MaxSpeed * 18.0f + Input.Steer * -6.0f, Blend);
+        float YawRate = Input.bHasDesiredYaw
+            ? Math.Clamp(Mathf.DeltaAngleDegrees(HeadingYaw, Input.DesiredYaw) * 2.5f, -Def.TurnRate, Def.TurnRate)
+            : Input.Steer * Def.TurnRate;
+        if (bParked)
+        {
+            YawRate = 0.0f;
+        }
+
+        FVector3 WantedSpin = FVector3.Cross(Mast, WantedMast) * 4.0f + FVector3.Up * Mathf.Radians(YawRate);
+        CPhysicsLibrary.SetAngularVelocity(World, Entity, Spin + (WantedSpin - Spin) * MathF.Min(1.0f, 8.0f * DeltaTime) * RotorSpool);
     }
 
     private void AimTurret(FVehicleInput Input, float DeltaTime)
@@ -706,7 +846,7 @@ public sealed class Vehicle : EntityScript, IDamageable
         Weapons.Fire(this, Weapon.Def, Muzzle, Direction, Rider?.Owner ?? Entity.Null, Driver == EDriver.Ai ? 5.0f : 0.0f);
         if (Weapon.Kind == EWeapon.TankCannon && IsPlayerControlled)
         {
-            CCameraLibrary.PlayImpactShake(World, 0.6f, 0.3f);
+            CameraShake.Impact(0.35f, 0.25f);
         }
     }
 
@@ -824,8 +964,35 @@ public sealed class Vehicle : EntityScript, IDamageable
         return Input;
     }
 
+    private void StopAutopilot()
+    {
+        if (bAutopiloting)
+        {
+            Autopilot?.Stop();
+            bAutopiloting = false;
+        }
+    }
+
+    // The vehicle navmesh routes a ground vehicle around what it cannot drive through, and the direct steer covers the time before it bakes.
     private void SteerToward(FVector3 Goal, float Throttle, ref FVehicleInput Input)
     {
+        if (!Def.bAir && Mercs.bVehicleNavReady && Autopilot is { } Route)
+        {
+            if (!bAutopiloting || Geo.FlatDistance(AutopilotGoal, Goal) > 4.0f)
+            {
+                Route.SetTargetLocation(Goal);
+                AutopilotGoal = Goal;
+                bAutopiloting = true;
+            }
+
+            Route.Speed = Throttle;
+            if (Route.IsFollowing() || !Route.DidPathFindingFail())
+            {
+                Input.bAutopilot = true;
+                return;
+            }
+        }
+
         FVector3 Offset = Geo.Flat(Goal - Pos);
         float Error = Mathf.DeltaAngleDegrees(Yaw, Geo.YawOf(Offset));
         Input.Steer = Math.Clamp(Error / 35.0f, -1.0f, 1.0f);
@@ -1060,6 +1227,9 @@ public sealed class Vehicle : EntityScript, IDamageable
         HomeSite?.OnVehicleLost(this);
 
         BuildVisuals(Palette.Wreck);
+        UpdateHeadlights();
+        Registry.Remove<SVehicleComponent>(Entity);
+        Registry.Remove<SAIStimuliSourceComponent>(Entity);
         Registry.Remove<SRigidBodyComponent>(Entity);
         Registry.Remove<SBoxColliderComponent>(Entity);
         BuildBody(EBodyType.Dynamic);

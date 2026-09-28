@@ -22,6 +22,7 @@ public sealed class MercCamera : EntityScript
 
     [Property(Category = "Camera", Min = 30.0f, Max = 120.0f)]
     public float FieldOfView = 70.0f;
+    private const float HideBodyDistance = 0.9f;
 
     public static MercCamera? Instance;
 
@@ -46,7 +47,7 @@ public sealed class MercCamera : EntityScript
         if (Created is not null)
         {
             Created.FOV = FieldOfView;
-            Created.FarPlane = 3000.0f;
+            Created.FarPlane = 30000.0f;
             Created.bAutoActivate = true;
         }
 
@@ -90,7 +91,7 @@ public sealed class MercCamera : EntityScript
         else
         {
             // The drawn pose, which interpolation keeps between fixed steps; the simulated pose would stutter.
-            Pivot = CEntityLibrary.GetRenderLocation(World, Player.Owner) + new FVector3(0.0f, 0.55f, 0.0f);
+            Pivot = CEntityLibrary.GetRenderLocation(World, Player.ViewTarget) + new FVector3(0.0f, 0.55f, 0.0f);
             Distance = Player.IsAiming ? AimDistance : FootDistance;
             Shoulder = ShoulderOffset;
             if (Player.IsAiming)
@@ -154,6 +155,9 @@ public sealed class MercCamera : EntityScript
 
         float Floor = Terrain.HeightAt(Desired.X, Desired.Z) + 0.4f;
         Desired.Y = MathF.Max(Desired.Y, MathF.Max(Floor, Terrain.SeaLevel + 0.3f));
+
+        // A wall that shoves the camera into the merc's head would otherwise fill the screen with the back of it.
+        Player.SetBodyHidden(Ride is null && FVector3.Distance(Desired, SmoothedPivot) < HideBodyDistance);
 
         ViewPosition = Desired;
         ViewForward = Forward;

@@ -82,14 +82,31 @@ public sealed class Soldier : EntityScript, IDamageable
     private bool bSubdued;
     private bool bReady;
 
-    private Entity Body = Entity.Null;
+    private HumanoidRig? Rig;
+    private Entity Body => Rig?.Body ?? Entity.Null;
     private STransformComponent? BodyTransform => Body.IsNull ? null : Registry.TryGet<STransformComponent>(Body);
+    private Entity Corpse = Entity.Null;
+    // Damage landing in one volley counts as one blow, so a shotgun blast tears a body apart the way a single heavy round does.
+    private float VolleyDamage;
+    private float VolleyTime;
+    private const float VolleyWindow = 0.12f;
+    private const float LimbAnimationRange = 90.0f;
+    private const float FlinchTime = 0.3f;
+    private float FlinchLeft;
+    private float FlinchPitch;
+    private float FlinchRoll;
     private Entity Marker = Entity.Null;
     private EMarker MarkerKind = EMarker.None;
     // Component wrappers are raw storage pointers that go stale when the storage grows, so they are looked up per use.
     private SCharacterControllerComponent? Controller => Registry.TryGet<SCharacterControllerComponent>(Entity);
     private SCharacterMovementComponent? Movement => Registry.TryGet<SCharacterMovementComponent>(Entity);
     private SHealthComponent? Health => Registry.TryGet<SHealthComponent>(Entity);
+    private SPathFollowComponent? Follow => Registry.TryGet<SPathFollowComponent>(Entity);
+    private FVector3 FollowGoal;
+    private FVector3 AbandonedGoal = new(float.MaxValue, 0.0f, 0.0f);
+    private bool bFollowing;
+    private bool bMovedThisFrame;
+    private int FramesAlive;
     private FVector3 CachedPosition;
 
     public Entity Owner => Entity;
@@ -141,6 +158,26 @@ public sealed class Soldier : EntityScript, IDamageable
             HumanoidBody.SetupCapsule(Registry, Entity, RunSpeed);
         }
 
+        SPathFollowComponent Path = Registry.GetOrAdd<SPathFollowComponent>(Entity)!;
+        Path.AcceptanceRadius = 0.7f;
+        Path.RepathInterval = 1.5f;
+        Path.RepathDistance = 2.0f;
+        SRVOAgentComponent Crowd = Registry.GetOrAdd<SRVOAgentComponent>(Entity)!;
+        Crowd.Radius = HumanoidBody.CapsuleRadius + 0.1f;
+        Crowd.MaxSpeed = RunSpeed;
+        Crowd.bClampToNavMesh = true;
+
+        // The engine scans sight in parallel, and the game only decides which of those it sees are enemies.
+        SPerceptionComponent Senses = Registry.GetOrAdd<SPerceptionComponent>(Entity)!;
+        Senses.SightRadius = SightRange * VehicleSightScale;
+        Senses.LoseSightRadius = SightRange * VehicleSightScale * 1.2f;
+        Senses.EyeOffset = new FVector3(0.0f, 0.65f, 0.0f);
+        Senses.bHearingEnabled = false;
+        Senses.bDamageEnabled = false;
+        Senses.ForgetTime = 4.0f;
+        Senses.UpdateInterval = 0.25f;
+        UpdateSightCone();
+
         Controller?.AddYaw(CurrentYaw);
 
         SHealthComponent? Created = Registry.GetOrAdd<SHealthComponent>(Entity);
@@ -150,7 +187,7 @@ public sealed class Soldier : EntityScript, IDamageable
             Created.Health = MaxHealth;
         }
 
-        Body = HumanoidBody.Build(World, Entity, Team, Weapon.Kind, Role == ESoldierRole.Officer || bIsHvt, bIsHvt ? 1.08f : 1.0f);
+        Rig = HumanoidBody.BuildRig(World, Entity, Team, Weapon.Kind, Role == ESoldierRole.Officer || bIsHvt, bIsHvt ? 1.08f : 1.0f);
         if (bIsHvt)
         {
             SetMarker(EMarker.Hvt);
@@ -175,12 +212,19 @@ public sealed class Soldier : EntityScript, IDamageable
             return;
         }
 
-        CachedPosition = World.GetEntityLocation(Entity);
+        // The dead are wherever their torso fell, which the photo check and the pickups look for.
+        CachedPosition = bDead && Registry.Valid(Corpse) ? World.GetEntityLocation(Corpse) : World.GetEntityLocation(Entity);
         HumanoidBody.AnimateMarker(World, Marker, 1.45f);
 
         if (bDead || bSubdued)
         {
             return;
+        }
+
+        // Structure bodies are created in a batch after spawning, so the overlap is only meaningful a few frames in.
+        if (++FramesAlive == 10)
+        {
+            EscapeEmbeddedSpawn();
         }
 
         StateTime += DeltaTime;
@@ -217,9 +261,27 @@ public sealed class Soldier : EntityScript, IDamageable
                 break;
         }
 
+        // Any state that stopped traveling this frame hands the controller back rather than leaving the old path driving it.
+        if (!bMovedThisFrame)
+        {
+            StopFollowing();
+        }
+        bMovedThisFrame = false;
+
         CheckWater();
         float Speed = Movement is not null ? Geo.Flat(Movement.Velocity).Length : 0.0f;
-        HumanoidBody.AnimateWalk(BodyTransform, Speed, ref WalkPhase, DeltaTime);
+        // Snaps away from the round at once and eases back, and one frame at zero puts the body upright again.
+        float Recoil = FlinchLeft > 0.0f ? (FlinchLeft / FlinchTime) * (FlinchLeft / FlinchTime) : 0.0f;
+        if (FlinchLeft > 0.0f)
+        {
+            FlinchLeft -= DeltaTime;
+            WalkPhase = FlinchLeft <= 0.0f && WalkPhase == 0.0f ? 1e-4f : WalkPhase;
+        }
+        HumanoidBody.AnimateWalk(BodyTransform, Speed, ref WalkPhase, DeltaTime, FlinchPitch * Recoil, FlinchRoll * Recoil);
+        if (FVector3.DistanceSquared(CachedPosition, Sfx.Listener) < LimbAnimationRange * LimbAnimationRange)
+        {
+            HumanoidBody.AnimateLimbs(Registry, Rig, Speed, WalkPhase, Weapon.Kind != EWeapon.None);
+        }
     }
 
     private void CheckWater()
@@ -242,6 +304,7 @@ public sealed class Soldier : EntityScript, IDamageable
         }
 
         State = NewState;
+        UpdateSightCone();
         StateTime = 0.0f;
         StuckTimer = 0.0f;
         StuckAnchor = CachedPosition;
@@ -302,82 +365,82 @@ public sealed class Soldier : EntityScript, IDamageable
         }
     }
 
+    // Vehicles are spotted from further off, so the engine senses to that range and infantry is trimmed back here.
+    private const float VehicleSightScale = 1.4f;
+    private const float AlertedSightScale = 1.35f;
+
+    // An alerted soldier watches every direction, as the old check did by skipping the facing test.
+    private void UpdateSightCone()
+    {
+        if (Registry.TryGet<SPerceptionComponent>(Entity) is { } Senses)
+        {
+            Senses.SightFOVDegrees = State is ESoldierState.Alert or ESoldierState.Combat ? 360.0f : 140.0f;
+        }
+    }
+
     private IDamageable? Perceive()
     {
         bool bAlerted = State is ESoldierState.Alert or ESoldierState.Combat;
-        float Range = bAlerted ? SightRange * 1.35f : SightRange;
-        FVector3 Forward = Geo.Heading(CurrentYaw);
-        FVector3 Eye = CachedPosition + new FVector3(0.0f, 0.65f, 0.0f);
+        float Range = bAlerted ? SightRange * AlertedSightScale : SightRange;
 
         IDamageable? Best = null;
         float BestScore = float.MaxValue;
-        int Checks = 0;
-
-        void Consider(IDamageable Candidate, float Bias)
+        foreach (Entity Seen in CPerceptionLibrary.GetPerceivedTargets(World, Entity))
         {
-            if (Checks >= 3 || !Candidate.IsAlive)
+            if (!CPerceptionLibrary.CanSense(World, Entity, Seen, EAISenseChannel.Sight) || Mercs.FindDamageable(Seen) is not { } Candidate)
             {
-                return;
+                continue;
             }
 
-            FVector3 Offset = Candidate.Position - CachedPosition;
-            float Distance = Offset.Length;
-            if (Distance > Range * (Candidate is Vehicle ? 1.4f : 1.0f))
+            // A driving player is fought as the vehicle, which is what the engine sees around him anyway.
+            if (Candidate is MercPlayer { CurrentVehicle: { } Driven })
             {
-                return;
+                Candidate = Driven;
             }
 
-            if (!bAlerted && Distance > 10.0f && FVector3.Dot(Forward, Geo.Flat(Offset).NormalizedOr(Forward)) < 0.35f)
+            if (!Candidate.IsAlive || Candidate == this)
             {
-                return;
+                continue;
             }
 
-            float Score = Distance * Bias;
-            if (Score >= BestScore)
+            float Bias;
+            if (Candidate.IsPlayerControlled)
             {
-                return;
+                Bias = 0.8f;
+                if (!Mercs.Factions.IsHostile(Team, Candidate))
+                {
+                    continue;
+                }
+            }
+            else if (Candidate is Soldier Other)
+            {
+                Bias = 1.0f;
+                if (Other.Team == Team || !FactionSystem.AtWar(Team, Other.Team))
+                {
+                    continue;
+                }
+            }
+            else if (Candidate is Vehicle Ride)
+            {
+                Bias = 1.2f;
+                if (!Ride.IsCrewed || !FactionSystem.AtWar(Team, Ride.Faction))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                continue;
             }
 
-            if (!Mercs.Factions.IsHostile(Team, Candidate))
+            float Distance = FVector3.Distance(Candidate.Position, CachedPosition);
+            if (Distance > Range * (Candidate is Vehicle ? VehicleSightScale : 1.0f) || Distance * Bias >= BestScore)
             {
-                return;
+                continue;
             }
 
-            ++Checks;
-            bool bSeen = Geo.LineOfSight(Eye, Candidate.Position + new FVector3(0.0f, 0.4f, 0.0f), Entity, Candidate.Owner)
-                || Geo.LineOfSight(Eye + new FVector3(0.0f, 0.3f, 0.0f), Candidate.Position + new FVector3(0.0f, 0.9f, 0.0f), Entity, Candidate.Owner);
-            if (!bSeen)
-            {
-                return;
-            }
-
-            BestScore = Score;
+            BestScore = Distance * Bias;
             Best = Candidate;
-        }
-
-        if (Mercs.Player is { } Player && Player.IsAlive)
-        {
-            IDamageable PlayerTarget = Player.CurrentVehicle is { } Ride ? Ride : Player;
-            Consider(PlayerTarget, 0.8f);
-        }
-
-        if (Checks < 3)
-        {
-            foreach (Soldier Other in Mercs.Soldiers)
-            {
-                if (Other != this && Other.Team != Team && FactionSystem.AtWar(Team, Other.Team) && FVector3.DistanceSquared(Other.CachedPosition, CachedPosition) < Range * Range)
-                {
-                    Consider(Other, 1.0f);
-                }
-            }
-
-            foreach (Vehicle Ride in Mercs.Vehicles)
-            {
-                if (Ride.IsAlive && Ride.IsCrewed && !Ride.IsPlayerControlled && FactionSystem.AtWar(Team, Ride.Faction))
-                {
-                    Consider(Ride, 1.2f);
-                }
-            }
         }
 
         return Best;
@@ -433,9 +496,8 @@ public sealed class Soldier : EntityScript, IDamageable
     {
         WanderWait -= DeltaTime;
         float GoalDistance = Geo.FlatDistance(CachedPosition, WanderGoal);
-        if (GoalDistance > 1.5f)
+        if (GoalDistance > 1.5f && MoveToward(WanderGoal, 0.35f, DeltaTime))
         {
-            MoveToward(WanderGoal, 0.35f, DeltaTime);
             return;
         }
 
@@ -465,13 +527,10 @@ public sealed class Soldier : EntityScript, IDamageable
         }
 
         FVector3 Goal = PatrolRoute[PatrolIndex % PatrolRoute.Count];
-        if (Geo.FlatDistance(CachedPosition, Goal) < 2.5f)
+        if (Geo.FlatDistance(CachedPosition, Goal) < 2.5f || !MoveToward(Goal, 0.4f, DeltaTime))
         {
             PatrolIndex = (PatrolIndex + 1) % PatrolRoute.Count;
-            return;
         }
-
-        MoveToward(Goal, 0.4f, DeltaTime);
     }
 
     private void TickAlert(float DeltaTime)
@@ -483,11 +542,8 @@ public sealed class Soldier : EntityScript, IDamageable
             return;
         }
 
-        if (Geo.FlatDistance(CachedPosition, LastKnown) > 4.0f)
-        {
-            MoveToward(LastKnown, 0.8f, DeltaTime);
-        }
-        else
+        bool bSearching = Geo.FlatDistance(CachedPosition, LastKnown) > 4.0f && MoveToward(LastKnown, 0.8f, DeltaTime);
+        if (!bSearching)
         {
             TurnToward(CurrentYaw + 90.0f, 60.0f, DeltaTime);
         }
@@ -690,13 +746,92 @@ public sealed class Soldier : EntityScript, IDamageable
         return Hit.bHit && Hit.Normal.Y < 0.6f && Mercs.FindDamageable(new Entity(Hit.Entity)) is not (Soldier or MercPlayer);
     }
 
-    private void MoveToward(FVector3 Goal, float Throttle, float DeltaTime)
+    // False once the soldier has got as close as the navmesh allows, or given up on a goal it kept getting stuck short of.
+    private bool MoveToward(FVector3 Goal, float Throttle, float DeltaTime)
+    {
+        if (Geo.Flat(Goal - CachedPosition).LengthSquared < 0.25f || Geo.FlatDistance(Goal, AbandonedGoal) < 1.5f)
+        {
+            return false;
+        }
+
+        if (Mercs.bInfantryNavReady && Follow is { } Path)
+        {
+            if (!bFollowing || Geo.FlatDistance(FollowGoal, Goal) > 1.5f)
+            {
+                Path.SetTargetLocation(Goal);
+                FollowGoal = Goal;
+                bFollowing = true;
+            }
+
+            Path.Speed = Throttle;
+            if (Path.IsStuck())
+            {
+                AbandonedGoal = Goal;
+                StopFollowing();
+                return false;
+            }
+
+            // A consumed path that still reads failed ended at the nearest reachable point, which is as close as this goal gets.
+            if (Path.IsAtDestination() || (Path.DidPathFindingFail() && Path.IsFollowing()))
+            {
+                StopFollowing();
+                return false;
+            }
+
+            if (Path.IsFollowing() || !Path.DidPathFindingFail())
+            {
+                bMovedThisFrame = true;
+                FVector3 Ahead = Geo.Flat(Path.GetNextCorner() - CachedPosition);
+                if (Ahead.LengthSquared > 0.01f)
+                {
+                    TurnToward(Geo.YawOf(Ahead), 360.0f, DeltaTime);
+                }
+                return true;
+            }
+        }
+
+        StopFollowing();
+        bMovedThisFrame = true;
+        MoveDirect(Goal, Throttle, DeltaTime);
+        return true;
+    }
+
+    // A spawn point inside a building's footprint embeds the capsule in its collider, where no movement can ever free it.
+    private void EscapeEmbeddedSpawn()
+    {
+        foreach (Entity Hit in CPhysicsLibrary.OverlapSphere(World, CachedPosition, HumanoidBody.CapsuleRadius, Entity))
+        {
+            if (Mercs.FindDamageable(Hit) is not Structure Building)
+            {
+                continue;
+            }
+
+            FVector3 Away = Geo.Flat(CachedPosition - Building.Position).NormalizedOr(FVector3.Right);
+            for (float Distance = Building.Radius * 0.5f; Distance < Building.Radius * 1.5f + 3.0f; Distance += 0.5f)
+            {
+                FVector3 Candidate = Geo.Ground(Building.Position + Away * Distance) + new FVector3(0.0f, HumanoidBody.FeetOffset + 0.1f, 0.0f);
+                if (!Array.Exists(CPhysicsLibrary.OverlapSphere(World, Candidate, HumanoidBody.CapsuleRadius, Entity), Other => Mercs.FindDamageable(Other) is Structure))
+                {
+                    Controller?.TeleportTo(Candidate);
+                    CachedPosition = Candidate;
+                    return;
+                }
+            }
+        }
+    }
+
+    private void StopFollowing()
+    {
+        if (bFollowing)
+        {
+            Follow?.Stop();
+            bFollowing = false;
+        }
+    }
+
+    private void MoveDirect(FVector3 Goal, float Throttle, float DeltaTime)
     {
         FVector3 Offset = Geo.Flat(Goal - CachedPosition);
-        if (Offset.LengthSquared < 0.25f)
-        {
-            return;
-        }
 
         float DesiredYaw = Geo.YawOf(Offset);
         DetourTime -= DeltaTime;
@@ -799,6 +934,13 @@ public sealed class Soldier : EntityScript, IDamageable
             return;
         }
 
+        VolleyDamage = Mercs.Time - VolleyTime <= VolleyWindow ? VolleyDamage + Hit.Amount : Hit.Amount;
+        VolleyTime = Mercs.Time;
+        if (Hit.Kind == EDamageKind.Explosive)
+        {
+            Mercs.Fx.BloodSpray(CachedPosition, (Hit.Direction + FVector3.Up).NormalizedOr(FVector3.Up), 12, 2.0f, 5.0f, 0.8f);
+        }
+
         float Remaining = Health.ApplyDamage(Hit.Amount, Hit.Source);
 
         if (Hit.bByPlayer && Mercs.Time - LastPlayerOffense > 4.0f && Remaining > 0.0f)
@@ -816,6 +958,14 @@ public sealed class Soldier : EntityScript, IDamageable
         {
             Die(Hit);
             return;
+        }
+
+        if (Hit.Kind is EDamageKind.Bullet or EDamageKind.Melee)
+        {
+            float Kick = Math.Clamp(Hit.Amount * 0.6f, 6.0f, 18.0f);
+            FlinchPitch = FVector3.Dot(Hit.Direction, Geo.Heading(CurrentYaw)) * Kick;
+            FlinchRoll = -FVector3.Dot(Hit.Direction, Geo.RightOf(CurrentYaw)) * Kick;
+            FlinchLeft = FlinchTime;
         }
 
         if (Role == ESoldierRole.Civilian)
@@ -878,8 +1028,8 @@ public sealed class Soldier : EntityScript, IDamageable
         bSubdued = false;
         State = ESoldierState.Dead;
         SetMarker(EMarker.None);
+        FVector3 Carry = Movement is { } Moving ? Moving.Velocity : FVector3.Zero;
         HumanoidBody.RemoveCapsule(Registry, Entity);
-        HumanoidBody.PoseDead(BodyTransform, Mercs.Range(-20.0f, 20.0f));
 
         if (Hit.bByPlayer)
         {
@@ -887,9 +1037,16 @@ public sealed class Soldier : EntityScript, IDamageable
         }
 
         FVector3 Ground = Geo.Ground(CachedPosition) + new FVector3(0.0f, 0.3f, 0.0f);
-        if (Weapon.Kind != EWeapon.None && Mercs.Chance(Weapon.Kind is EWeapon.Rocket or EWeapon.Sniper or EWeapon.MachineGun ? 0.8f : 0.4f))
+        bool bDropsWeapon = Weapon.Kind != EWeapon.None && Mercs.Chance(Weapon.Kind is EWeapon.Rocket or EWeapon.Sniper or EWeapon.MachineGun ? 0.8f : 0.4f);
+        if (bDropsWeapon)
         {
             Pickup.SpawnWeapon(Ground + new FVector3(0.6f, 0.0f, 0.3f), Weapon.Kind);
+        }
+
+        float Lifetime = bIsHvt ? 600.0f : 25.0f;
+        if (Rig is not null)
+        {
+            Corpse = Gore.Kill(Rig, Hit, Carry, Lifetime, Mercs.Time - VolleyTime <= VolleyWindow ? VolleyDamage : 0.0f, !bDropsWeapon);
         }
 
         if (Team != EFaction.Civilian && Mercs.Chance(0.35f))

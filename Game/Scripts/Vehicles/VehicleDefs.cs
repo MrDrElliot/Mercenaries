@@ -17,6 +17,9 @@ public enum EVehicleType : byte
     Sedan,
 }
 
+// One physics wheel in the vehicle's local frame, where Y is up from the ground under the vehicle at rest.
+public readonly record struct FWheelSpec(float X, float Z, float Radius, float Width, bool bSteer, bool bVisual);
+
 public sealed class VehicleDef
 {
     public EVehicleType Type;
@@ -38,6 +41,27 @@ public sealed class VehicleDef
     public float CameraDistance = 9.0f;
     public float CameraHeight = 3.0f;
     public float CrushSpeed = 4.0f;
+    public bool bSkidSteer;
+    public readonly List<FWheelSpec> Wheels = new();
+
+    // Four wheels at the corners, front pair steering.
+    public VehicleDef Axles(float Track, float Front, float Rear, float Radius, float Width, params float[] Middle)
+    {
+        AddAxle(Track, Front, Radius, Width, true);
+        foreach (float Z in Middle)
+        {
+            AddAxle(Track, Z, Radius, Width, false);
+        }
+        AddAxle(Track, Rear, Radius, Width, false);
+        return this;
+    }
+
+    public VehicleDef AddAxle(float Track, float Z, float Radius, float Width, bool bSteer, bool bVisual = true)
+    {
+        Wheels.Add(new FWheelSpec(Track, Z, Radius, Width, bSteer, bVisual));
+        Wheels.Add(new FWheelSpec(-Track, Z, Radius, Width, bSteer, bVisual));
+        return this;
+    }
 }
 
 public static class VehicleDefs
@@ -46,20 +70,41 @@ public static class VehicleDefs
 
     static VehicleDefs()
     {
-        Add(new VehicleDef { Type = EVehicleType.Jeep, Name = "Jeep", MaxHealth = 450, MaxSpeed = 30, Acceleration = 14, TurnRate = 95, HalfExtents = new FVector3(0.95f, 0.7f, 2.1f), Crew = 1, CameraDistance = 8.5f });
-        Add(new VehicleDef { Type = EVehicleType.Technical, Name = "Technical", MaxHealth = 500, MaxSpeed = 27, Acceleration = 12, TurnRate = 85, HalfExtents = new FVector3(1.0f, 0.75f, 2.4f), Primary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.1f, -1.2f), MuzzleLength = 1.1f, Crew = 2, CameraDistance = 9.0f });
-        Add(new VehicleDef { Type = EVehicleType.Truck, Name = "Cargo Truck", MaxHealth = 800, MaxSpeed = 22, Acceleration = 8, TurnRate = 60, HalfExtents = new FVector3(1.25f, 1.3f, 3.6f), Clearance = 0.5f, Crew = 3, CameraDistance = 11.0f, CameraHeight = 4.0f });
-        Add(new VehicleDef { Type = EVehicleType.FuelTruck, Name = "Fuel Truck", MaxHealth = 600, MaxSpeed = 20, Acceleration = 7, TurnRate = 55, HalfExtents = new FVector3(1.25f, 1.3f, 3.8f), Clearance = 0.5f, Crew = 1, CameraDistance = 11.0f, CameraHeight = 4.0f });
-        Add(new VehicleDef { Type = EVehicleType.Apc, Name = "APC", bHeavy = true, MaxHealth = 1600, MaxSpeed = 20, Acceleration = 8, TurnRate = 55, HalfExtents = new FVector3(1.4f, 1.0f, 3.3f), Clearance = 0.45f, Primary = EWeapon.Autocannon, Secondary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.55f, 0.3f), MuzzleLength = 2.2f, Crew = 3, CameraDistance = 11.0f, CameraHeight = 4.0f, CrushSpeed = 3.0f });
-        Add(new VehicleDef { Type = EVehicleType.Tank, Name = "Main Battle Tank", bHeavy = true, MaxHealth = 3200, MaxSpeed = 15, Acceleration = 6, TurnRate = 42, HalfExtents = new FVector3(1.7f, 0.95f, 3.5f), Clearance = 0.3f, Primary = EWeapon.TankCannon, Secondary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.25f, -0.2f), MuzzleLength = 5.2f, Crew = 2, CameraDistance = 12.5f, CameraHeight = 4.5f, CrushSpeed = 2.0f });
+        Add(new VehicleDef { Type = EVehicleType.Jeep, Name = "Jeep", MaxHealth = 450, MaxSpeed = 30, Acceleration = 14, TurnRate = 95, HalfExtents = new FVector3(0.95f, 0.7f, 2.1f), Crew = 1, CameraDistance = 8.5f }
+            .Axles(0.85f, 1.35f, -1.35f, 0.42f, 0.3f));
+        Add(new VehicleDef { Type = EVehicleType.Technical, Name = "Technical", MaxHealth = 500, MaxSpeed = 27, Acceleration = 12, TurnRate = 85, HalfExtents = new FVector3(1.0f, 0.75f, 2.4f), Primary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.1f, -1.2f), MuzzleLength = 1.1f, Crew = 2, CameraDistance = 9.0f }
+            .Axles(0.85f, 1.35f, -1.35f, 0.42f, 0.3f));
+        Add(new VehicleDef { Type = EVehicleType.Truck, Name = "Cargo Truck", MaxHealth = 800, MaxSpeed = 22, Acceleration = 8, TurnRate = 60, HalfExtents = new FVector3(1.25f, 1.3f, 3.6f), Clearance = 0.5f, Crew = 3, CameraDistance = 11.0f, CameraHeight = 4.0f }
+            .Axles(1.05f, 2.4f, -2.6f, 0.55f, 0.4f, -1.2f));
+        Add(new VehicleDef { Type = EVehicleType.FuelTruck, Name = "Fuel Truck", MaxHealth = 600, MaxSpeed = 20, Acceleration = 7, TurnRate = 55, HalfExtents = new FVector3(1.25f, 1.3f, 3.8f), Clearance = 0.5f, Crew = 1, CameraDistance = 11.0f, CameraHeight = 4.0f }
+            .Axles(1.05f, 2.4f, -2.6f, 0.55f, 0.4f, -1.2f));
+        Add(new VehicleDef { Type = EVehicleType.Apc, Name = "APC", bHeavy = true, MaxHealth = 1600, MaxSpeed = 20, Acceleration = 8, TurnRate = 55, HalfExtents = new FVector3(1.4f, 1.0f, 3.3f), Clearance = 0.45f, Primary = EWeapon.Autocannon, Secondary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.55f, 0.3f), MuzzleLength = 2.2f, Crew = 3, CameraDistance = 11.0f, CameraHeight = 4.0f, CrushSpeed = 3.0f }
+            .AddAxle(1.3f, 2.4f, 0.55f, 0.36f, true).AddAxle(1.3f, 0.8f, 0.55f, 0.36f, true).AddAxle(1.3f, -0.8f, 0.55f, 0.36f, false).AddAxle(1.3f, -2.4f, 0.55f, 0.36f, false));
+        VehicleDef Tank = new() { Type = EVehicleType.Tank, Name = "Main Battle Tank", bHeavy = true, MaxHealth = 3200, MaxSpeed = 15, Acceleration = 6, TurnRate = 42, HalfExtents = new FVector3(1.7f, 0.95f, 3.5f), Clearance = 0.3f, Primary = EWeapon.TankCannon, Secondary = EWeapon.VehicleMG, bTurret = true, TurretOffset = new FVector3(0.0f, 2.25f, -0.2f), MuzzleLength = 5.2f, Crew = 2, CameraDistance = 12.5f, CameraHeight = 4.5f, CrushSpeed = 2.0f, bSkidSteer = true };
+        for (int Roller = 0; Roller < 6; ++Roller)
+        {
+            Tank.AddAxle(1.35f, 2.6f - Roller * 1.04f, 0.45f, 0.7f, false, false);
+        }
+        Add(Tank);
         Add(new VehicleDef { Type = EVehicleType.AttackHeli, Name = "Attack Helicopter", bHeavy = true, bAir = true, MaxHealth = 1300, MaxSpeed = 42, Acceleration = 14, TurnRate = 80, HalfExtents = new FVector3(1.3f, 1.3f, 5.2f), Clearance = 0.0f, Primary = EWeapon.HeliRockets, Secondary = EWeapon.Autocannon, Crew = 2, CameraDistance = 16.0f, CameraHeight = 5.0f });
         Add(new VehicleDef { Type = EVehicleType.TransportHeli, Name = "Transport Helicopter", bHeavy = true, bAir = true, MaxHealth = 1500, MaxSpeed = 36, Acceleration = 10, TurnRate = 60, HalfExtents = new FVector3(1.6f, 1.6f, 6.0f), Clearance = 0.0f, Secondary = EWeapon.VehicleMG, Crew = 2, CameraDistance = 18.0f, CameraHeight = 6.0f });
-        Add(new VehicleDef { Type = EVehicleType.Sedan, Name = "Sedan", MaxHealth = 300, MaxSpeed = 32, Acceleration = 13, TurnRate = 100, HalfExtents = new FVector3(0.9f, 0.65f, 2.2f), Crew = 1, CameraDistance = 8.0f });
+        Add(new VehicleDef { Type = EVehicleType.Sedan, Name = "Sedan", MaxHealth = 300, MaxSpeed = 32, Acceleration = 13, TurnRate = 100, HalfExtents = new FVector3(0.9f, 0.65f, 2.2f), Crew = 1, CameraDistance = 8.0f }
+            .Axles(0.8f, 1.35f, -1.35f, 0.34f, 0.24f));
     }
 
     private static void Add(VehicleDef Def) => Defs[Def.Type] = Def;
 
     public static VehicleDef Get(EVehicleType Type) => Defs[Type];
+
+    // Centered on its axle, so the vehicle can steer and spin it about its own origin.
+    public static MeshKit BuildWheel(float Radius, float Width)
+    {
+        MeshKit Wheel = new();
+        Wheel.Tube(new FVector3(-Width * 0.5f, 0.0f, 0.0f), new FVector3(Width * 0.5f, 0.0f, 0.0f), Radius, Radius, Palette.Rubber, 10);
+        Wheel.Box(new FVector3(Width * 0.5f + 0.01f, 0.0f, 0.0f), new FVector3(0.01f, Radius * 0.45f, Radius * 0.45f), Palette.Steel);
+        Wheel.Box(new FVector3(-Width * 0.5f - 0.01f, 0.0f, 0.0f), new FVector3(0.01f, Radius * 0.45f, Radius * 0.45f), Palette.Steel);
+        return Wheel;
+    }
 
     public static EntityHull BuildHull(EVehicleType Type, FVector4 Paint)
     {
@@ -67,23 +112,12 @@ public static class VehicleDefs
         MeshKit Turret = new();
         MeshKit Rotor = new();
         FVector4 Dark = Palette.Shade(Paint, 0.7f);
-        FVector4 Tire = Palette.Rubber;
-
-        void Wheel(float X, float Z, float Radius, float Width)
-        {
-            Hull.Tube(new FVector3(X - Width * 0.5f, Radius, Z), new FVector3(X + Width * 0.5f, Radius, Z), Radius, Radius, Tire, 10);
-            Hull.Box(new FVector3(X + MathF.Sign(X) * (Width * 0.5f + 0.01f), Radius, Z), new FVector3(0.01f, Radius * 0.45f, Radius * 0.45f), Palette.Steel);
-        }
 
         switch (Type)
         {
             case EVehicleType.Jeep:
             case EVehicleType.Technical:
             {
-                Wheel(0.85f, 1.35f, 0.42f, 0.3f);
-                Wheel(-0.85f, 1.35f, 0.42f, 0.3f);
-                Wheel(0.85f, -1.35f, 0.42f, 0.3f);
-                Wheel(-0.85f, -1.35f, 0.42f, 0.3f);
                 Hull.Box(new FVector3(0.0f, 0.85f, 0.0f), new FVector3(0.9f, 0.3f, 2.1f), Paint);
                 Hull.Box(new FVector3(0.0f, 1.2f, 1.35f), new FVector3(0.85f, 0.12f, 0.75f), Dark);
                 Hull.Box(new FVector3(0.0f, 1.45f, 0.5f), new FVector3(0.85f, 0.3f, 0.04f), Palette.Glass, FQuat.FromEuler(Mathf.Radians(-20.0f), 0.0f, 0.0f));
@@ -109,10 +143,6 @@ public static class VehicleDefs
             }
             case EVehicleType.Sedan:
             {
-                Wheel(0.8f, 1.35f, 0.34f, 0.24f);
-                Wheel(-0.8f, 1.35f, 0.34f, 0.24f);
-                Wheel(0.8f, -1.35f, 0.34f, 0.24f);
-                Wheel(-0.8f, -1.35f, 0.34f, 0.24f);
                 Hull.Box(new FVector3(0.0f, 0.7f, 0.0f), new FVector3(0.88f, 0.28f, 2.2f), Paint);
                 Hull.Box(new FVector3(0.0f, 1.2f, -0.2f), new FVector3(0.8f, 0.25f, 1.1f), Palette.Glass);
                 Hull.Box(new FVector3(0.0f, 1.46f, -0.2f), new FVector3(0.78f, 0.03f, 0.95f), Paint);
@@ -121,12 +151,6 @@ public static class VehicleDefs
             case EVehicleType.Truck:
             case EVehicleType.FuelTruck:
             {
-                Wheel(1.05f, 2.4f, 0.55f, 0.4f);
-                Wheel(-1.05f, 2.4f, 0.55f, 0.4f);
-                Wheel(1.05f, -1.2f, 0.55f, 0.4f);
-                Wheel(-1.05f, -1.2f, 0.55f, 0.4f);
-                Wheel(1.05f, -2.6f, 0.55f, 0.4f);
-                Wheel(-1.05f, -2.6f, 0.55f, 0.4f);
                 Hull.Box(new FVector3(0.0f, 0.95f, 0.0f), new FVector3(1.15f, 0.2f, 3.6f), Palette.Gunmetal);
                 Hull.Box(new FVector3(0.0f, 1.9f, 2.55f), new FVector3(1.2f, 0.85f, 1.0f), Paint);
                 Hull.Box(new FVector3(0.0f, 2.15f, 3.56f), new FVector3(1.05f, 0.35f, 0.03f), Palette.Glass);
@@ -145,13 +169,6 @@ public static class VehicleDefs
             }
             case EVehicleType.Apc:
             {
-                for (int Axle = 0; Axle < 4; ++Axle)
-                {
-                    float Z = 2.4f - Axle * 1.6f;
-                    Wheel(1.3f, Z, 0.55f, 0.36f);
-                    Wheel(-1.3f, Z, 0.55f, 0.36f);
-                }
-
                 Hull.Box(new FVector3(0.0f, 1.35f, 0.0f), new FVector3(1.35f, 0.6f, 3.3f), Paint);
                 Hull.Box(new FVector3(0.0f, 1.65f, 3.05f), new FVector3(1.2f, 0.35f, 0.4f), Dark, FQuat.FromEuler(Mathf.Radians(35.0f), 0.0f, 0.0f));
                 Hull.Box(new FVector3(0.0f, 2.0f, -0.3f), new FVector3(1.2f, 0.12f, 2.6f), Dark);

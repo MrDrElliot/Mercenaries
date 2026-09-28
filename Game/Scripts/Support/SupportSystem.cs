@@ -297,14 +297,14 @@ public sealed class SupportSystem
     {
         CWorld World = Mercs.World;
         Entity Handle = World.CreateEntity(bHelicopter ? "SupportHeli" : "SupportPlane", From, FQuat.LookRotation(Geo.Flat(To - From).NormalizedOr(FVector3.Forward), FVector3.Up));
-        Kit.Commit(World.Registry, Handle);
+        Kit.Commit(World.Registry, Handle, false, true, false);
         Entity Rotor = Entity.Null;
         if (RotorKit is not null)
         {
             Rotor = World.CreateEntity("SupportRotor", FVector3.Zero);
             World.SetParent(Rotor, Handle);
             World.Registry.Get<STransformComponent>(Rotor).SetLocalLocation(new FVector3(0.0f, 3.55f, 0.2f));
-            RotorKit.Commit(World.Registry, Rotor, false, false);
+            RotorKit.Commit(World.Registry, Rotor, false, false, false);
         }
 
         FFlight Flight = new() { Handle = Handle, Rotor = Rotor, From = From, To = To, Speed = Speed, Length = FVector3.Distance(From, To), bHelicopter = bHelicopter, Position = From, LastPosition = From };

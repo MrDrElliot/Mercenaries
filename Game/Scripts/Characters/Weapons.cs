@@ -165,6 +165,8 @@ public static class Weapons
             return FirstImpact;
         }
 
+        Mercs.Fx.Casing(Muzzle, Direction);
+
         for (int Pellet = 0; Pellet < Def.Pellets; ++Pellet)
         {
             FVector3 Aim = Spread(Direction, Def.SpreadDegrees + ExtraSpread);
@@ -195,9 +197,17 @@ public static class Weapons
             }
 
             IDamageable? Target = Mercs.FindDamageable(new Entity(Hit.Entity));
+            if (Target is null && Gore.IsGib(new Entity(Hit.Entity)))
+            {
+                Gore.HitGib(new Entity(Hit.Entity), Hit.Location, Aim, Def.Damage);
+                Sfx.At(ESfx.HitBody, Hit.Location, 0.45f, 50.0f, 2.0f, 0.12f, 0.02f);
+                continue;
+            }
+
             if (Target is null)
             {
                 Mercs.Fx.Impact(Hit.Location, Hit.Normal, false);
+                Mercs.Fx.BulletHole(Hit.Location, Hit.Normal);
                 Sfx.At(Mercs.Rng.NextDouble() < 0.12 ? ESfx.Ricochet : ESfx.ImpactGround, Hit.Location, 0.45f, 60.0f, 2.0f, 0.12f, 0.02f);
                 continue;
             }
@@ -221,6 +231,15 @@ public static class Weapons
             else if (Target is not (Soldier or MercPlayer))
             {
                 Mercs.Fx.Impact(Hit.Location, Hit.Normal, Target is Vehicle);
+                if (Target is Structure)
+                {
+                    Mercs.Fx.BulletHole(Hit.Location, Hit.Normal);
+                }
+            }
+
+            if (Target is Soldier or MercPlayer && Target.IsAlive)
+            {
+                Gore.Wound(Hit.Location, Aim, Amount, Target.Owner);
             }
 
             Target.TakeHit(FHit.From(Shooter, Amount, EDamageKind.Bullet, Hit.Location, Aim));

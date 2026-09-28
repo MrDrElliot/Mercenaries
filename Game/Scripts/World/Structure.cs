@@ -238,6 +238,22 @@ public sealed class Structure : EntityScript, IDamageable
         }
     }
 
+    // Bursts into chunks of its own walls from the blast, and the rubble takes its place in the same frame so nothing is drawn twice.
+    private void Shatter(FVector3 From, float Strength)
+    {
+        MeshKit Kit = new();
+        StructureShapes.Build(Kit, Kind, Size, Tint, Mercs.Factions.Get(OwnerFaction), DamageStage);
+        if (Kit.BuildStaticMesh(World) is { } Snapshot)
+        {
+            // Surface counts as well as bulk, or a long thin wall breaks into a few slabs the size of the wall itself.
+            float Surface = Size.X * Size.Y + Size.Y * Size.Z + Size.X * Size.Z;
+            int Pieces = Math.Clamp((int)MathF.Max(Size.X * Size.Y * Size.Z / 30.0f, Surface / 10.0f), 6, 32);
+            CDestructionLibrary.ShatterMesh(World, Snapshot, new FTransform(Base, Rotation, FVector3.One), From, Strength, Pieces, 10.0f);
+        }
+
+        ShowRubble();
+    }
+
     public void ShowRubble()
     {
         Mercs.Fx.Stage(Entity, new FTransform(Base, Rotation, FVector3.One));
@@ -255,26 +271,25 @@ public sealed class Structure : EntityScript, IDamageable
         Registry.Remove<SRigidBodyComponent>(Entity);
         Registry.Remove<SBoxColliderComponent>(Entity);
 
-        int Chunks = Math.Clamp((int)(Size.X * Size.Z * Size.Y / 40.0f), 3, 14);
-        Mercs.Fx.Debris(Center, Tint, Chunks, 7.0f + Size.Y, MathF.Min(1.2f, Size.Y * 0.18f));
-        if (!IsFlimsy && Kind is not (EStructureKind.Wall or EStructureKind.Bunker or EStructureKind.Statue))
-        {
-            Mercs.Fx.Debris(Center + new FVector3(0.0f, Size.Y * 0.4f, 0.0f), Palette.RoofTile, Chunks / 2 + 1, 6.0f + Size.Y, MathF.Min(1.0f, Size.Y * 0.14f));
-        }
-
         FVector3 Push = Geo.Flat(Center - Hit.Point);
         if (Push.LengthSquared < 0.01f)
         {
             Push = Hit.Direction;
         }
 
+        // Blasts from far off or with no point of their own burst the building from its middle.
+        FVector3 BlastPoint = FVector3.Distance(Hit.Point, Center) < Radius * 2.0f ? Hit.Point : Center;
+
         if (IsExplosive)
         {
             Explosion.Detonate(Center, MathF.Max(9.0f, Size.X), Kind == EStructureKind.FuelTank ? 600.0f : 320.0f, Hit.bByPlayer ? (IDamageable?)Mercs.Player : null, 1.5f);
-            Mercs.Destruction.Sink(this, 0.7f);
+            Shatter(Center - new FVector3(0.0f, Size.Y * 0.3f, 0.0f), 11.0f);
+            Mercs.Destruction.Crumble(this, 1.2f);
         }
         else if (IsFlimsy)
         {
+            int Chunks = Math.Clamp((int)(Size.X * Size.Z * Size.Y / 40.0f), 3, 14);
+            Mercs.Fx.Debris(Center, Tint, Chunks, 7.0f + Size.Y, MathF.Min(1.2f, Size.Y * 0.18f));
             Sfx.At(ESfx.WoodBreak, Center, 0.7f, 120.0f, 5.0f, 0.12f);
             for (int Index = 0; Index < 3; ++Index)
             {
@@ -291,7 +306,8 @@ public sealed class Structure : EntityScript, IDamageable
         else
         {
             Mercs.Fx.Explosion(Center, MathF.Min(Radius, 5.0f) * 0.6f);
-            Mercs.Destruction.Sink(this, 1.2f + Size.Y * 0.08f);
+            Shatter(BlastPoint, 5.0f + Size.Y * 0.3f);
+            Mercs.Destruction.Crumble(this, 1.7f + Size.Y * 0.08f);
         }
 
         if (Hit.bByPlayer)

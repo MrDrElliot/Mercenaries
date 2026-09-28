@@ -115,14 +115,15 @@ public static class Explosion
     {
         FVector3 Listener = Mercs.PlayerPosition;
         float Distance = FVector3.Distance(Listener, At);
-        float Reach = Radius * 9.0f;
+        float Reach = Radius * 6.0f;
         if (Distance > Reach)
         {
             return;
         }
 
-        float Intensity = (1.0f - Distance / Reach) * MathF.Min(2.0f, Radius * 0.18f);
-        CCameraLibrary.PlayImpactShake(Mercs.World, Intensity, 0.35f + Radius * 0.02f);
+        // Squared falloff, so only a blast at arm's length rattles the view hard.
+        float Proximity = 1.0f - Distance / Reach;
+        CameraShake.Impact(Proximity * Proximity * MathF.Min(0.7f, Radius * 0.06f), 0.3f + Radius * 0.015f);
     }
 }
 
@@ -192,7 +193,7 @@ public sealed class OrdnanceSystem
         for (int Index = 0; Index < Count; ++Index)
         {
             Entity Handle = Mercs.World.CreateEntity($"Ordnance_{Look}_{Index}", Hidden);
-            MeshKit.Show(Mercs.World.Registry, Handle, Mesh, false);
+            MeshKit.Show(Mercs.World.Registry, Handle, Mesh, false, false);
             Shots.Add(new FShot { Handle = Handle, Look = Look });
         }
     }
@@ -305,7 +306,11 @@ public sealed class OrdnanceSystem
                 if (Shot.TrailTimer <= 0.0f)
                 {
                     Shot.TrailTimer = Shot.Look == EOrdnanceLook.Rocket ? 0.03f : 0.08f;
-                    Mercs.Fx.Puff(From, Shot.Look == EOrdnanceLook.Rocket ? 0.6f : 0.9f, 1.2f, false, FVector3.Zero);
+                    float TrailSize = Shot.Look == EOrdnanceLook.Rocket ? 0.6f : 0.9f;
+                    if (!Mercs.Fx.Trail(From, TrailSize))
+                    {
+                        Mercs.Fx.Puff(From, TrailSize, 1.2f, false, FVector3.Zero);
+                    }
                 }
             }
         }

@@ -90,7 +90,7 @@ public sealed class ThrowableSystem
                 break;
         }
 
-        Kit.Commit(Registry, Handle, bGlow, false);
+        Kit.Commit(Registry, Handle, bGlow, false, false);
 
         using (new FPhysicsBatchScope(World))
         {

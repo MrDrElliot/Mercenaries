@@ -66,8 +66,6 @@ public sealed class DestructionSystem
     private const float FoliageCell = 64.0f;
     private const float StructureFireScale = 1.8f;
     private const int MaxFallenTrees = 28;
-    private const int ScorchCount = 48;
-    private static readonly FVector3 Hidden = new(0.0f, -640.0f, 0.0f);
 
     // The engine's instanced foliage draws the plants, and this grid only answers the gameplay queries.
     private readonly Dictionary<(int, int), List<FPlant>> Cells = new();
@@ -77,24 +75,8 @@ public sealed class DestructionSystem
     private readonly List<FFalling> Falling = new();
     private readonly List<FSinking> Sinking = new();
     private readonly List<FBurning> Burning = new();
-    private readonly List<Entity> Scorches = new();
     private readonly List<(int, int)> CellScratch = new();
-    private int NextScorch;
     private int FallenTrees;
-
-    public void Initialize()
-    {
-        MeshKit Disc = new();
-        Disc.Cylinder(FVector3.Zero, 1.0f, 0.03f, Palette.Mix(Palette.Dirt, Palette.Wreck, 0.5f), 14);
-        Disc.Cylinder(new FVector3(0.0f, 0.005f, 0.0f), 0.6f, 0.03f, Palette.Shade(Palette.Wreck, 0.7f), 12);
-        CStaticMesh? DiscMesh = Disc.BuildStaticMesh(Mercs.World);
-        for (int Index = 0; Index < ScorchCount; ++Index)
-        {
-            Entity Handle = Mercs.World.CreateEntity($"Scorch_{Index}", Hidden);
-            MeshKit.Show(Mercs.World.Registry, Handle, DiscMesh, false);
-            Scorches.Add(Handle);
-        }
-    }
 
     public void Shutdown()
     {
@@ -199,7 +181,7 @@ public sealed class DestructionSystem
         float Ground = Terrain.HeightAt(At.X, At.Z);
         if (At.Y - Ground < Radius * 0.6f && Ground > Terrain.SeaLevel - 0.2f)
         {
-            PlaceScorch(new FVector3(At.X, Ground, At.Z), Radius * Mercs.Range(0.35f, 0.5f));
+            Mercs.Fx.Scorch(new FVector3(At.X, Ground, At.Z), Terrain.NormalAt(At.X, At.Z), Radius * Mercs.Range(0.7f, 1.0f));
         }
 
         ForPlantsNear(At, Radius * 0.9f, Plant =>
@@ -328,10 +310,16 @@ public sealed class DestructionSystem
             TiltRadians = Mathf.Radians(Mercs.Range(3.0f, 9.0f)),
         });
 
+        Crumble(Target, Duration + 0.5f);
+    }
+
+    // The dust, rumble and shake of a collapse, which a shattered structure keeps though it turns to rubble at once.
+    public void Crumble(Structure Target, float ShakeDuration)
+    {
         Mercs.Fx.CollapseDust(Target.BasePosition, Target.Size);
         float Bulk = Target.Size.X * Target.Size.Y * Target.Size.Z;
         Sfx.At(ESfx.Collapse, Target.Position, Mathf.Clamp(0.4f + Bulk / 1500.0f, 0.45f, 1.0f), 700.0f, MathF.Max(Target.Size.X, 6.0f), 0.1f);
-        Shake(Target.Position, MathF.Min(2.0f, 0.4f + Bulk / 1200.0f), Duration + 0.5f);
+        Shake(Target.Position, MathF.Min(2.0f, 0.4f + Bulk / 1200.0f), ShakeDuration);
     }
 
     public void Ignite(Structure Target)
@@ -349,28 +337,13 @@ public sealed class DestructionSystem
 
     public bool IsBurning(Structure Target) => Burning.Exists(Fire => Fire.Target == Target);
 
-    private void PlaceScorch(FVector3 Ground, float Radius)
-    {
-        if (Scorches.Count == 0)
-        {
-            return;
-        }
-
-        Entity Handle = Scorches[NextScorch];
-        NextScorch = (NextScorch + 1) % Scorches.Count;
-        FVector3 Normal = Terrain.NormalAt(Ground.X, Ground.Z);
-        FQuat Rotation = FQuat.FromToRotation(FVector3.Up, Normal) * FQuat.FromEuler(0.0f, Mercs.Range(0.0f, Mathf.TwoPi), 0.0f);
-        FVector3 Lifted = Ground + Normal * Mercs.Range(0.02f, 0.07f);
-        Mercs.Fx.Stage(Handle, new FTransform(Lifted, Rotation, new FVector3(Radius, 1.0f, Radius)));
-    }
-
     private static void Shake(FVector3 At, float Strength, float Duration)
     {
         float Distance = FVector3.Distance(At, Sfx.Listener);
-        float Falloff = 1.0f - Mathf.Clamp01(Distance / 160.0f);
+        float Falloff = 1.0f - Mathf.Clamp01(Distance / 120.0f);
         if (Falloff > 0.0f)
         {
-            CCameraLibrary.PlayImpactShake(Mercs.World, Strength * Falloff, Duration);
+            CameraShake.Impact(Strength * Falloff * Falloff * 0.35f, Duration);
         }
     }
 

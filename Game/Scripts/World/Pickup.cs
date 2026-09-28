@@ -159,7 +159,7 @@ public sealed class Pickup : EntityScript
             _ => Palette.Rgb(0.4f, 0.8f, 1.0f),
         };
 
-        Kit.Commit(Registry, Entity);
+        Kit.Commit(Registry, Entity, false, true, false);
         if (!GlowEntity.IsNull)
         {
             return;
@@ -171,7 +171,7 @@ public sealed class Pickup : EntityScript
         MeshKit Halo = new();
         float Size = Kind == EPickupKind.Supplies ? 1.1f : 0.4f;
         Halo.Tube(new FVector3(0.0f, -0.3f, 0.0f), new FVector3(0.0f, -0.28f, 0.0f), Size, Size, Ring, 12);
-        Halo.Commit(Registry, Glow, true, false);
+        Halo.Commit(Registry, Glow, true, false, false);
         Registry.Get<STransformComponent>(Glow).SetLocalLocation(FVector3.Zero);
     }
 

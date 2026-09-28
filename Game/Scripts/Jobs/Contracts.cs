@@ -315,7 +315,7 @@ public sealed class ContractBoard
             MeshKit Kit = new();
             Kit.Tube(FVector3.Zero, new FVector3(0.0f, 140.0f, 0.0f), 0.35f, 0.1f, Palette.Rgb(1.0f, 0.55f, 0.1f), 6, false);
             Beam = World.CreateEntity("ObjectiveBeam", Target.Value);
-            Kit.Commit(World.Registry, Beam, true, false);
+            Kit.Commit(World.Registry, Beam, true, false, false);
         }
 
         FVector3 Ground = Geo.Ground(Target.Value);

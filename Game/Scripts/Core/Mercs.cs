@@ -88,6 +88,7 @@ public static class Mercs
     public static OrdnanceSystem Ordnance = new();
     public static ThrowableSystem Throwables = new();
     public static DestructionSystem Destruction = new();
+    public static DayNight Clock = new();
 
     public static readonly List<Soldier> Soldiers = new();
     public static readonly List<Vehicle> Vehicles = new();
@@ -97,6 +98,11 @@ public static class Mercs
     public static readonly Dictionary<uint, IDamageable> Damageables = new();
 
     public static bool IsRunning => Director is not null;
+
+    // The vehicle navmesh is baked wider than the infantry one, and queries name it to get paths a truck fits through.
+    public const string VehicleNavAgent = "Vehicle";
+    public static bool bInfantryNavReady;
+    public static bool bVehicleNavReady;
 
     public static void Reset(CWorld NewWorld, GameDirector NewDirector)
     {

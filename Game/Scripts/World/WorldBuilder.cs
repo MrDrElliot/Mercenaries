@@ -35,14 +35,8 @@ public sealed class WorldBuilder
 
         foreach (Site Place in Mercs.Sites)
         {
-            FVector4 Ground = Place.Kind switch
-            {
-                ESiteKind.Village or ESiteKind.Capital => Palette.Mix(Palette.Dirt, Palette.Sand, 0.4f),
-                ESiteKind.PmcHq or ESiteKind.FactionHq or ESiteKind.Refinery => Palette.ConcreteDark,
-                ESiteKind.Harbor => Palette.Shade(Palette.Concrete, 0.8f),
-                _ => Palette.Dirt,
-            };
-            Terrain.AddPad(Place.Center, Place.Radius, Ground);
+            bool bPaved = Place.Kind is ESiteKind.PmcHq or ESiteKind.FactionHq or ESiteKind.Refinery or ESiteKind.Harbor;
+            Terrain.AddPad(Place.Center, Place.Radius, bPaved);
         }
 
         foreach ((string From, string To) in Edges)
@@ -88,6 +82,39 @@ public sealed class WorldBuilder
         Mercs.Destruction.CommitFoliage();
         DefineHvts();
         DefineContracts();
+        BuildNavigation();
+    }
+
+    // Baked after every structure stands, so the first bake already routes around them.
+    private void BuildNavigation()
+    {
+        // Climb stays under the capsule's step height, or the mesh routes soldiers up ledges their feet cannot take.
+        AddNavVolume("Nav_Infantry", string.Empty, 0.4f, 0.4f, 1.8f, 0.4f, 45.0f);
+        AddNavVolume("Nav_Vehicles", Mercs.VehicleNavAgent, 0.8f, 1.8f, 2.6f, 0.7f, 32.0f);
+    }
+
+    private void AddNavVolume(string Name, string Agent, float CellSize, float AgentRadius, float AgentHeight, float MaxClimb, float MaxSlope)
+    {
+        // The sea is a surface rather than a collider, so the volume starts at the waterline or paths would run across the seabed.
+        const float HalfHeight = 50.0f;
+        FVector3 Center = new(0.0f, Terrain.SeaLevel - 0.5f + HalfHeight, 0.0f);
+        Entity Volume = World.CreateEntity(Name, Center);
+        SNavMeshComponent Nav = Registry.GetOrAdd<SNavMeshComponent>(Volume)!;
+        Nav.Agent = Agent;
+        Nav.Center = Center;
+        Nav.Extents = new FVector3(Terrain.HalfSize - 40.0f, HalfHeight, Terrain.HalfSize - 40.0f);
+        Nav.DynamicRebuildInterval = 1.0f;
+
+        FNavBuildSettings Settings = Nav.Settings;
+        Settings.CellSize = CellSize;
+        Settings.CellHeight = CellSize * 0.5f;
+        Settings.AgentRadius = AgentRadius;
+        Settings.AgentHeight = AgentHeight;
+        Settings.AgentMaxClimb = MaxClimb;
+        Settings.AgentMaxSlopeDeg = MaxSlope;
+        Settings.TileSizeVoxels = 64;
+        Nav.Settings = Settings;
+        Nav.RequestRebuild();
     }
 
     private static FVector3 WithPadHeight(FVector3 At) => new(At.X, Terrain.PadHeight(At), At.Z);
@@ -162,6 +189,9 @@ public sealed class WorldBuilder
         Fog.FogVisibilityDistance = 2600.0f;
         Fog.FogMaxOpacity = 0.35f;
         Fog.FogInscatteringColor = new FVector3(0.55f, 0.65f, 0.75f);
+
+        Mercs.Clock = new DayNight();
+        Mercs.Clock.Bind(Sun, Sky);
     }
 
     private Structure? Place(Site Home, EStructureKind Kind, float X, float Z, float Yaw, FVector3 Size, FVector4? Tint = null, EFaction? Owner = null)
